@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+.env
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+*.pyi
+
+# Node
+node_modules/
+.next/
+out/
+.turbo/
+.vercel/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Data directories (keep structure, ignore contents)
+data/uploads/*
+data/temp/*
+data/frames/*
+data/outputs/*
+data/models/*
+data/logs/*
+!data/uploads/.gitkeep
+!data/temp/.gitkeep
+!data/frames/.gitkeep
+!data/outputs/.gitkeep
+!data/models/.gitkeep
+!data/logs/.gitkeep
+
+# Environment
+.env
+.env.local
+.env.production
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# IDE
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace

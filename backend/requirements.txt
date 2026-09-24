@@ -1,0 +1,31 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+python-multipart>=0.0.20
+pydantic>=2.10.0
+pydantic-settings>=2.7.0
+aiofiles>=24.1.0
+httpx>=0.28.0
+websockets>=14.0
+
+# ─── Computer Vision & AI ────────────────────────────────────────────────────
+# NOTE: Python 3.14 compatibility — using flexible version ranges
+opencv-python-headless>=4.8.0
+numpy>=1.26.0
+Pillow>=10.0.0
+
+# onnxruntime: Python 3.14 ke liye 1.24.x+ chahiye
+# GPU wale: onnxruntime-gpu install karo (CUDA ke liye)
+onnxruntime>=1.24.0
+
+# InsightFace — face detection & swapping
+insightface>=0.7.3
+
+# GFPGAN — face enhancement (optional, comment out karo agar install fail ho)
+gfpgan>=1.3.8
+
+# ─── System ─────────────────────────────────────────────────────────────────
+psutil>=6.0.0
+
+# ─── Utilities ───────────────────────────────────────────────────────────────
+python-dotenv>=1.0.0
+structlog>=24.0.0

@@ -1,0 +1,14 @@
+{
+  "name": "faceflux",
+  "version": "1.0.0",
+  "description": "FaceFlux — Local AI Face Swap",
+  "scripts": {
+    "dev": "npm run dev --prefix backend & npm run dev --prefix frontend",
+    "dev:backend": "npm run dev --prefix backend",
+    "dev:frontend": "npm run dev --prefix frontend",
+    "install:backend": "pip3 install --break-system-packages -r backend/requirements.txt",
+    "install:frontend": "npm install --prefix frontend",
+    "install:all": "npm run install:backend && npm run install:frontend",
+    "models": "bash scripts/download-models.sh"
+  }
+}

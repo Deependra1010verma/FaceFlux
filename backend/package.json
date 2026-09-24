@@ -1,0 +1,10 @@
+{
+  "name": "faceflux-backend",
+  "version": "1.0.0",
+  "description": "FaceFlux FastAPI backend",
+  "scripts": {
+    "dev": "python3 -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload",
+    "start": "python3 -m uvicorn main:app --host 127.0.0.1 --port 8000",
+    "install-deps": "pip3 install --break-system-packages -r requirements.txt"
+  }
+}
