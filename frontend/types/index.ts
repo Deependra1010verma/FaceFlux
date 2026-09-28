@@ -7,7 +7,50 @@ export type JobStatus =
   | "ENHANCING"
   | "ENCODING"
   | "COMPLETED"
-  | "FAILED";
+  | "FAILED"
+  | "CANCELLED";
+
+export type GenStatus =
+  | "QUEUED"
+  | "UPLOADING"
+  | "GENERATING"
+  | "COMPLETED"
+  | "FAILED"
+  | "CANCELLED";
+
+export interface GenJob {
+  job_id: string;
+  status: GenStatus;
+  progress: number;
+  stage_message: string;
+  error_message: string | null;
+  output_ready: boolean;
+  provider: string | null;
+  created_at: number;
+  completed_at: number | null;
+}
+
+export type TryOnStatus =
+  | "QUEUED"
+  | "EXTRACTING"
+  | "PROCESSING"
+  | "ASSEMBLING"
+  | "COMPLETED"
+  | "FAILED"
+  | "CANCELLED";
+
+export interface TryOnJob {
+  job_id: string;
+  status: TryOnStatus;
+  progress: number;
+  stage_message: string;
+  error_message: string | null;
+  output_ready: boolean;
+  total_frames: number;
+  processed_frames: number;
+  created_at: number;
+  completed_at: number | null;
+}
 
 export interface FaceInfo {
   index: number;

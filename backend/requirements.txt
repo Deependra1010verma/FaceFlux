@@ -8,24 +8,24 @@ httpx>=0.28.0
 websockets>=14.0
 
 # ─── Computer Vision & AI ────────────────────────────────────────────────────
-# NOTE: Python 3.14 compatibility — using flexible version ranges
 opencv-python-headless>=4.8.0
 numpy>=1.26.0
 Pillow>=10.0.0
 
-# onnxruntime: Python 3.14 ke liye 1.24.x+ chahiye
-# GPU wale: onnxruntime-gpu install karo (CUDA ke liye)
-onnxruntime>=1.24.0
+onnxruntime>=1.16.0
 
-# InsightFace — face detection & swapping
+# InsightFace — face detection & swapping (main engine)
 insightface>=0.7.3
 
-# GFPGAN — face enhancement (optional, comment out karo agar install fail ho)
-gfpgan>=1.3.8
-
-# ─── System ─────────────────────────────────────────────────────────────────
+# ─── System ──────────────────────────────────────────────────────────────────
 psutil>=6.0.0
 
 # ─── Utilities ───────────────────────────────────────────────────────────────
 python-dotenv>=1.0.0
 structlog>=24.0.0
+
+# ─── GFPGAN (Optional Face Enhancement) ──────────────────────────────────────
+# NOTE: Python 3.14 pe install NAHI hoga (basicsr incompatible)
+# Sirf Python 3.10/3.11 pe kaam karta hai
+# Bina iske bhi app perfectly chalega — enhancement sirf bonus tha
+# gfpgan>=1.3.8

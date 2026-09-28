@@ -8,7 +8,7 @@ warna os.environ + .env file manually parse karta hai.
 import os
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parents[3]  # project root
+BASE_DIR = Path(os.environ.get("BASE_DIR", str(Path(__file__).resolve().parents[3])))
 
 
 def _load_env_file() -> None:
@@ -95,6 +95,10 @@ class Settings:
     # InsightFace
     det_size:             int   = _int("DET_SIZE",              640)
     face_score_threshold: float = _float("FACE_SCORE_THRESHOLD", 0.5)
+
+    # Cloud & Remote GPU Settings
+    hf_token:             str = _str("HF_TOKEN", "")
+    colab_gpu_url:        str = _str("COLAB_GPU_URL", "")
 
     @property
     def max_video_size_bytes(self) -> int:

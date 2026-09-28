@@ -120,6 +120,7 @@ class FaceDetector:
         if not cap.isOpened():
             raise ValueError(f"Cannot open video: {video_path}")
 
+        first_frame = None
         best_frame = None
         best_faces: List = []
         frame_idx = 0
@@ -129,6 +130,8 @@ class FaceDetector:
                 ret, frame = cap.read()
                 if not ret:
                     break
+                if first_frame is None:
+                    first_frame = frame.copy()
                 if frame_idx % sample_every_n_frames == 0:
                     faces = self.detect_in_image(frame)
                     if len(faces) > len(best_faces):
@@ -138,9 +141,11 @@ class FaceDetector:
         finally:
             cap.release()
 
-        if best_frame is None:
+        # If faces were found, use that frame; otherwise fallback to first frame read
+        selected_frame = best_frame if best_frame is not None else first_frame
+        if selected_frame is None:
             raise ValueError("No frames could be read from video.")
-        return best_frame, best_faces
+        return selected_frame, best_faces
 
 
 face_detector = FaceDetector()

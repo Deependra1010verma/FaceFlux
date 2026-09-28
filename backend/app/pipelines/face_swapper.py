@@ -22,7 +22,7 @@ from app.services.hardware import hardware_service
 logger = get_logger(__name__)
 
 INSWAPPER_URL = (
-    "https://huggingface.co/deepinsight/inswapper/resolve/main/inswapper_128.onnx"
+    "https://github.com/deepinsight/insightface/releases/download/model-zoo/inswapper_128.onnx"
 )
 INSWAPPER_FILENAME = "inswapper_128.onnx"
 
@@ -41,16 +41,19 @@ class FaceSwapper:
 
     def _ensure_model(self) -> None:
         model_path = self._model_path()
-        if not model_path.exists():
+        # Check both existence and valid file size (> 1MB)
+        if not model_path.exists() or model_path.stat().st_size < 1_000_000:
             logger.info("downloading_inswapper_model", url=INSWAPPER_URL)
             settings.model_dir.mkdir(parents=True, exist_ok=True)
+            if model_path.exists():
+                model_path.unlink(missing_ok=True)
             try:
                 urllib.request.urlretrieve(INSWAPPER_URL, str(model_path))
                 logger.info("model_downloaded", path=str(model_path))
             except Exception as e:
                 raise RuntimeError(
                     f"Failed to download inswapper model from {INSWAPPER_URL}: {e}\n"
-                    f"Please manually download inswapper_128.onnx to: {model_path}"
+                    f"Please run 'bash scripts/download-models.sh' to download it."
                 ) from e
 
     def _load(self) -> None:
@@ -64,10 +67,41 @@ class FaceSwapper:
                 str(self._model_path()),
                 providers=providers,
             )
-            self._swapper.prepare(ctx_id=0 if "CUDA" in hardware_service.acceleration else -1)
+            # Note: INSwapper uses the ONNX providers directly and does not have a prepare() method
             logger.info("face_swapper_loaded", provider=providers[0])
         except Exception as e:
             raise RuntimeError(f"Failed to load FaceSwapper: {e}") from e
+
+    def fuse_source_faces(self, source_faces: list):
+        """
+        Takes a list of detected Face objects from multiple reference photos
+        (e.g. front, left, right, angled) and computes a normalized average embedding vector.
+        This provides high-fidelity 3D facial structure coverage across any video angle.
+        """
+        if not source_faces:
+            return None
+        if len(source_faces) == 1:
+            return source_faces[0]
+
+        embeddings = [
+            f.embedding for f in source_faces 
+            if hasattr(f, "embedding") and f.embedding is not None
+        ]
+        if not embeddings:
+            return source_faces[0]
+
+        import copy
+        mean_emb = np.mean(embeddings, axis=0)
+        norm = np.linalg.norm(mean_emb)
+        normed_emb = mean_emb / norm if norm > 0 else mean_emb
+
+        fused_face = copy.copy(source_faces[0])
+        fused_face.embedding = normed_emb
+        if hasattr(fused_face, "normed_embedding"):
+            fused_face.normed_embedding = normed_emb
+
+        logger.info("source_faces_fused", count=len(embeddings))
+        return fused_face
 
     def swap(
         self,

@@ -96,23 +96,20 @@ export function HardwareBadge({ info }: HardwareBadgeProps) {
         </div>
       </div>
 
-      {/* GFPGAN status */}
+      {/* CodeFormer status */}
       <div className="pt-1 border-t border-slate-800 flex items-center gap-2">
         {info.gfpgan_available ? (
           <>
             <CheckCircle className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
             <span className="text-[11px] text-emerald-400">
-              GFPGAN available — Face Enhancement enabled
+              Face Enhancement ready (CodeFormer / Torch)
             </span>
           </>
         ) : (
           <>
-            <XCircle className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
-            <span className="text-[11px] text-amber-500">
-              GFPGAN not installed — Enhancement disabled.{" "}
-              <code className="bg-slate-800 px-1 rounded text-[10px]">
-                pip3 install --break-system-packages gfpgan
-              </code>
+            <XCircle className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
+            <span className="text-[11px] text-slate-400">
+              Face Enhancement optional (requires basicsr)
             </span>
           </>
         )}

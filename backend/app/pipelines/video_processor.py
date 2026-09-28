@@ -13,6 +13,7 @@ import numpy as np
 
 from app.core.config import settings
 from app.core.logger import get_logger
+from app.core import job_store
 from app.models.job import Job, JobStatus, VideoMeta
 from app.pipelines.face_detector import face_detector
 from app.pipelines.face_swapper import face_swapper
@@ -103,13 +104,30 @@ async def process_video(job: Job, update_progress: ProgressCallback) -> str:
         if meta.has_audio:
             has_audio = extract_audio(video_path, audio_path)
 
-        # ── Step 3: Detect source face ────────────────────────────────────
-        update_progress(JobStatus.DETECTING, 5, "Detecting faces in reference photo...")
-        source_faces = face_detector.detect_in_file(face_path)
-        if not source_faces:
-            raise ValueError("No face detected in the reference photo.")
-        source_face = source_faces[0]
-        logger.info("source_face_detected", job_id=job_id)
+        # ── Step 3: Detect and fuse source face(s) ──────────────────────
+        update_progress(JobStatus.DETECTING, 5, "Detecting faces in reference photos...")
+        all_face_paths = job.face_paths if job.face_paths else [job.face_path]
+        detected_source_faces = []
+
+        for p_str in all_face_paths:
+            faces = face_detector.detect_in_file(Path(p_str))
+            if faces:
+                detected_source_faces.append(faces[0])
+
+        if not detected_source_faces:
+            raise ValueError("Uploaded reference photos mein koi face detect nahi hua.")
+
+        if len(detected_source_faces) > 1:
+            update_progress(
+                JobStatus.DETECTING,
+                8,
+                f"Fusing 3D facial angles from {len(detected_source_faces)} reference photos...",
+            )
+            source_face = face_swapper.fuse_source_faces(detected_source_faces)
+        else:
+            source_face = detected_source_faces[0]
+
+        logger.info("source_face_prepared", job_id=job_id, count=len(detected_source_faces))
 
         # ── Step 4: Open video and process frames ─────────────────────────
         update_progress(JobStatus.TRACKING, 10, "Opening video and tracking target face...")
@@ -145,6 +163,11 @@ async def process_video(job: Job, update_progress: ProgressCallback) -> str:
                 ret, frame = cap.read()
                 if not ret:
                     break
+
+                # ── Cancellation check ────────────────────────────────────
+                if job_store.is_cancelled(job_id):
+                    logger.info("job_cancelled_mid_pipeline", job_id=job_id, frame=frame_idx)
+                    raise InterruptedError("Job cancelled by user.")
 
                 output_frame = frame.copy()
 
@@ -219,6 +242,6 @@ async def process_video(job: Job, update_progress: ProgressCallback) -> str:
         return str(output_path)
 
     # Run blocking pipeline in thread pool to avoid blocking event loop
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(None, _run_pipeline)
     return result

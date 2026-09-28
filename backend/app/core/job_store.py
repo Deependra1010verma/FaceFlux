@@ -10,6 +10,7 @@ logger = get_logger(__name__)
 
 _jobs: Dict[str, Job] = {}
 _semaphore: Optional[asyncio.Semaphore] = None
+_cancelled_jobs: set = set()
 
 
 def get_semaphore() -> asyncio.Semaphore:
@@ -19,12 +20,21 @@ def get_semaphore() -> asyncio.Semaphore:
     return _semaphore
 
 
-def create_job(video_path: str, face_path: str, quality: str, enhance: bool, target_face_index: int = 0) -> Job:
+def create_job(
+    video_path: str,
+    face_path: str,
+    quality: str,
+    enhance: bool,
+    target_face_index: int = 0,
+    face_paths: list[str] = None,
+) -> Job:
     job_id = generate_job_id()
+    all_face_paths = face_paths if face_paths else ([face_path] if face_path else [])
     job = Job(
         job_id=job_id,
         video_path=video_path,
         face_path=face_path,
+        face_paths=all_face_paths,
         quality=quality,
         enhance=enhance,
         target_face_index=target_face_index,
@@ -32,7 +42,7 @@ def create_job(video_path: str, face_path: str, quality: str, enhance: bool, tar
         created_at=time.time(),
     )
     _jobs[job_id] = job
-    logger.info("job_created", job_id=job_id, quality=quality)
+    logger.info("job_created", job_id=job_id, quality=quality, face_count=len(all_face_paths))
     return job
 
 
@@ -50,7 +60,21 @@ def update_job(job_id: str, **kwargs) -> Optional[Job]:
 
 
 def delete_job(job_id: str) -> bool:
+    _cancelled_jobs.discard(job_id)
     return _jobs.pop(job_id, None) is not None
+
+
+def cancel_job(job_id: str) -> bool:
+    """Mark a job as cancelled so the pipeline loop stops."""
+    job = _jobs.get(job_id)
+    if job is None:
+        return False
+    _cancelled_jobs.add(job_id)
+    return True
+
+
+def is_cancelled(job_id: str) -> bool:
+    return job_id in _cancelled_jobs
 
 
 def list_jobs() -> list[Job]:

@@ -11,7 +11,7 @@ from app.core.config import settings
 from app.core.logger import get_logger
 from app.core.directories import ensure_directories
 from app.services.hardware import hardware_service
-from app.api import health, upload, jobs, system
+from app.api import health, upload, jobs, system, generate, tryon
 
 logger = get_logger(__name__)
 
@@ -24,15 +24,17 @@ def _get_cors_origins() -> list[str]:
     Example .env:
       CORS_ORIGINS=https://faceflux.vercel.app,https://your-app.vercel.app
     """
+    extra = os.environ.get("CORS_ORIGINS", "*")
+    if extra.strip() == "*":
+        return ["*"]
     defaults = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
     ]
-    extra = os.environ.get("CORS_ORIGINS", "")
     if extra:
         extras = [o.strip() for o in extra.split(",") if o.strip()]
         return list(set(defaults + extras))
-    return defaults
+    return ["*"]
 
 
 @asynccontextmanager
@@ -71,5 +73,7 @@ def create_app() -> FastAPI:
     application.include_router(system.router, prefix="/system-info", tags=["System"])
     application.include_router(upload.router, prefix="/upload", tags=["Upload"])
     application.include_router(jobs.router, prefix="/jobs", tags=["Jobs"])
+    application.include_router(generate.router, prefix="/generate", tags=["Generate"])
+    application.include_router(tryon.router, prefix="/tryon", tags=["TryOn"])
 
     return application

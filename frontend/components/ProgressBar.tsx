@@ -12,6 +12,7 @@ const STATUS_LABELS: Record<JobStatus, string> = {
   ENCODING: "Encoding video...",
   COMPLETED: "Complete!",
   FAILED: "Failed",
+  CANCELLED: "Cancelled",
 };
 
 const STATUS_COLORS: Record<JobStatus, string> = {
@@ -24,6 +25,7 @@ const STATUS_COLORS: Record<JobStatus, string> = {
   ENCODING: "bg-pink-500",
   COMPLETED: "bg-emerald-500",
   FAILED: "bg-red-500",
+  CANCELLED: "bg-slate-500",
 };
 
 interface ProgressBarProps {

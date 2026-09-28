@@ -21,7 +21,10 @@ ALLOWED_VIDEO_MIME = {"video/mp4", "video/quicktime", "video/x-matroska", "video
 ALLOWED_IMAGE_MIME = {"image/jpeg", "image/png", "image/webp"}
 
 
-async def _save_upload(file: UploadFile, directory, allowed_exts: set, max_bytes: int) -> str:
+ALLOWED_TARGET_EXTS = ALLOWED_VIDEO_EXTS | ALLOWED_IMAGE_EXTS
+
+
+async def _save_upload(file: UploadFile, directory, allowed_exts: set, max_bytes: int) -> tuple[str, int]:
     filename = file.filename or "upload"
     ext = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
@@ -58,7 +61,7 @@ async def upload_video(file: UploadFile = File(...)) -> UploadResponse:
     path, size = await _save_upload(
         file,
         settings.upload_dir,
-        ALLOWED_VIDEO_EXTS,
+        ALLOWED_TARGET_EXTS,
         settings.max_video_size_bytes,
     )
     upload_id = path.rsplit("/", 1)[-1].split("_")[0]

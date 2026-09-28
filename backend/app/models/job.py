@@ -15,6 +15,7 @@ class JobStatus(str, Enum):
     ENCODING = "ENCODING"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
 
 
 class FaceInfo(BaseModel):
@@ -38,6 +39,7 @@ class Job(BaseModel):
     job_id: str
     video_path: str
     face_path: str
+    face_paths: List[str] = []
     quality: str
     enhance: bool
     target_face_index: int = 0
@@ -55,7 +57,8 @@ class Job(BaseModel):
 
 class JobCreateRequest(BaseModel):
     video_upload_id: str
-    face_upload_id: str
+    face_upload_id: Optional[str] = None
+    face_upload_ids: Optional[List[str]] = None
     target_face_index: int = 0
     quality: str = "balanced"
     enhance: bool = True
