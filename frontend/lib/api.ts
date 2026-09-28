@@ -8,13 +8,42 @@ import type {
   UploadResponse,
 } from "@/types";
 
-const BASE = (process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000").replace(/\/+$/, "");
+export function getApiBaseUrl(): string {
+  if (typeof window !== "undefined") {
+    try {
+      const saved = localStorage.getItem("faceflux_api_url");
+      if (saved && saved.trim()) {
+        return saved.trim().replace(/\/+$/, "");
+      }
+    } catch {}
+  }
+  return (process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000").replace(/\/+$/, "");
+}
+
+export function setApiBaseUrl(url: string): void {
+  if (typeof window !== "undefined") {
+    try {
+      if (url && url.trim()) {
+        localStorage.setItem("faceflux_api_url", url.trim().replace(/\/+$/, ""));
+      } else {
+        localStorage.removeItem("faceflux_api_url");
+      }
+    } catch {}
+  }
+}
 
 async function apiRequest<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, options);
+  const base = getApiBaseUrl();
+  const headers = new Headers(options.headers || {});
+  headers.set("Bypass-Tunnel-Reminder", "true");
+
+  const res = await fetch(`${base}${path}`, {
+    ...options,
+    headers,
+  });
   if (!res.ok) {
     let detail = `HTTP ${res.status}`;
     try {
@@ -72,7 +101,8 @@ function uploadWithProgress<T>(
     };
 
     xhr.onerror = () => reject(new Error("Network error during upload"));
-    xhr.open("POST", `${BASE}${path}`);
+    xhr.open("POST", `${getApiBaseUrl()}${path}`);
+    xhr.setRequestHeader("Bypass-Tunnel-Reminder", "true");
     xhr.send(form);
   });
 }
@@ -117,15 +147,21 @@ export async function getJobProgress(jobId: string): Promise<JobProgress> {
 }
 
 export async function deleteJob(jobId: string): Promise<void> {
-  await fetch(`${BASE}/jobs/${jobId}`, { method: "DELETE" });
+  await fetch(`${getApiBaseUrl()}/jobs/${jobId}`, {
+    method: "DELETE",
+    headers: { "Bypass-Tunnel-Reminder": "true" },
+  });
 }
 
 export async function cancelJob(jobId: string): Promise<void> {
-  await fetch(`${BASE}/jobs/${jobId}/cancel`, { method: "POST" });
+  await fetch(`${getApiBaseUrl()}/jobs/${jobId}/cancel`, {
+    method: "POST",
+    headers: { "Bypass-Tunnel-Reminder": "true" },
+  });
 }
 
 export function getOutputUrl(jobId: string): string {
-  return `${BASE}/jobs/${jobId}/output`;
+  return `${getApiBaseUrl()}/jobs/${jobId}/output`;
 }
 
 // ── SSE Progress Stream ───────────────────────────────────────────────────────
@@ -136,7 +172,7 @@ export function streamJobProgress(
   onDone: () => void,
   onError: (err: Error) => void
 ): () => void {
-  const es = new EventSource(`${BASE}/jobs/${jobId}/stream`);
+  const es = new EventSource(`${getApiBaseUrl()}/jobs/${jobId}/stream`);
 
   es.onmessage = (event) => {
     try {
@@ -146,7 +182,7 @@ export function streamJobProgress(
         es.close();
         onDone();
       }
-    } catch (e) {
+    } catch {
       onError(new Error("Failed to parse SSE message"));
     }
   };
@@ -181,11 +217,14 @@ export async function getGenJob(jobId: string): Promise<GenJob> {
 }
 
 export function getGenOutputUrl(jobId: string): string {
-  return `${BASE}/generate/${jobId}/output`;
+  return `${getApiBaseUrl()}/generate/${jobId}/output`;
 }
 
 export async function cancelGenJob(jobId: string): Promise<void> {
-  await fetch(`${BASE}/generate/${jobId}/cancel`, { method: "POST" });
+  await fetch(`${getApiBaseUrl()}/generate/${jobId}/cancel`, {
+    method: "POST",
+    headers: { "Bypass-Tunnel-Reminder": "true" },
+  });
 }
 
 export function streamGenProgress(
@@ -193,7 +232,7 @@ export function streamGenProgress(
   onMessage: (job: GenJob) => void,
   onError: (err: Error) => void
 ): () => void {
-  const es = new EventSource(`${BASE}/generate/${jobId}/stream`);
+  const es = new EventSource(`${getApiBaseUrl()}/generate/${jobId}/stream`);
 
   es.onmessage = (event) => {
     try {
@@ -233,11 +272,14 @@ export async function getTryOnJob(jobId: string): Promise<TryOnJob> {
 }
 
 export function getTryOnOutputUrl(jobId: string): string {
-  return `${BASE}/tryon/${jobId}/output`;
+  return `${getApiBaseUrl()}/tryon/${jobId}/output`;
 }
 
 export async function cancelTryOnJob(jobId: string): Promise<void> {
-  await fetch(`${BASE}/tryon/${jobId}/cancel`, { method: "POST" });
+  await fetch(`${getApiBaseUrl()}/tryon/${jobId}/cancel`, {
+    method: "POST",
+    headers: { "Bypass-Tunnel-Reminder": "true" },
+  });
 }
 
 export function streamTryOnProgress(
@@ -245,7 +287,7 @@ export function streamTryOnProgress(
   onMessage: (job: TryOnJob) => void,
   onError: (err: Error) => void
 ): () => void {
-  const es = new EventSource(`${BASE}/tryon/${jobId}/stream`);
+  const es = new EventSource(`${getApiBaseUrl()}/tryon/${jobId}/stream`);
 
   es.onmessage = (event) => {
     try {

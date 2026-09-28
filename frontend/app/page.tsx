@@ -18,6 +18,7 @@ import { HardwareBadge } from "@/components/HardwareBadge";
 import { ProgressBar } from "@/components/ProgressBar";
 import { TryOnPanel } from "@/components/TryOnPanel";
 import { VideoOutput } from "@/components/VideoOutput";
+import { ServerModal } from "@/components/ServerModal";
 import { AlertCircle, Loader2, RefreshCw, Settings2, Sparkles, Wand2, XCircle } from "lucide-react";
 
 type Stage = "idle" | "uploading" | "processing" | "done" | "error";
@@ -31,6 +32,7 @@ export default function HomePage() {
   const [sysInfo, setSysInfo] = useState<SystemInfo | null>(null);
   const [backendError, setBackendError] = useState<string | null>(null);
   const [backendLoading, setBackendLoading] = useState(true);
+  const [showServerModal, setShowServerModal] = useState(false);
 
   const loadSystemInfo = useCallback(() => {
     setBackendLoading(true);
@@ -227,21 +229,36 @@ export default function HomePage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <div
-              className={`w-2 h-2 rounded-full ${
-                backendLoading
-                  ? "bg-yellow-400 animate-pulse"
-                  : backendError
-                  ? "bg-red-400"
-                  : "bg-emerald-400 animate-pulse"
-              }`}
-            />
-            <span className="text-xs text-slate-400">
-              {backendLoading ? "Connecting..." : backendError ? "Backend offline" : "Local · Private"}
-            </span>
+            <button
+              onClick={() => setShowServerModal(true)}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-slate-700 bg-slate-800/80 hover:bg-slate-700/80 transition text-xs font-medium text-slate-300"
+              title="Change or test backend server URL"
+            >
+              <div
+                className={`w-2 h-2 rounded-full ${
+                  backendLoading
+                    ? "bg-yellow-400 animate-pulse"
+                    : backendError
+                    ? "bg-red-400"
+                    : "bg-emerald-400 animate-pulse"
+                }`}
+              />
+              <span>
+                {backendLoading ? "Connecting..." : backendError ? "Offline" : "Connected"}
+              </span>
+              <Settings2 className="w-3.5 h-3.5 text-slate-400 ml-0.5" />
+            </button>
           </div>
         </div>
       </header>
+
+      <ServerModal
+        isOpen={showServerModal}
+        onClose={() => setShowServerModal(false)}
+        onServerChange={() => {
+          loadSystemInfo();
+        }}
+      />
 
       <div className="max-w-4xl mx-auto px-4 py-8 space-y-5">
 
@@ -284,13 +301,22 @@ export default function HomePage() {
               <p>cd /home/deependra/Projects/FaceFlux/backend</p>
               <p>python3 -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload</p>
             </div>
-            <button
-              onClick={loadSystemInfo}
-              className="flex items-center gap-2 text-xs text-red-300 hover:text-red-200 transition-colors"
-            >
-              <RefreshCw className="w-3 h-3" />
-              Dobara try karo
-            </button>
+            <div className="flex items-center gap-4 pt-1">
+              <button
+                onClick={loadSystemInfo}
+                className="flex items-center gap-2 text-xs text-red-300 hover:text-red-200 transition-colors font-medium"
+              >
+                <RefreshCw className="w-3 h-3" />
+                Dobara try karo
+              </button>
+              <button
+                onClick={() => setShowServerModal(true)}
+                className="flex items-center gap-1.5 text-xs text-violet-300 hover:text-violet-200 transition-colors font-medium underline cursor-pointer"
+              >
+                <Settings2 className="w-3 h-3" />
+                Server URL Badlo (Colab / Tunnel)
+              </button>
+            </div>
           </div>
         )}
 
