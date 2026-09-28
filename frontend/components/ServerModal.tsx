@@ -140,6 +140,31 @@ export function ServerModal({ isOpen, onClose, onServerChange }: ServerModalProp
           </div>
         </div>
 
+        {/* Google Colab 1-Click Launch */}
+        <div className="p-3 rounded-xl border border-amber-500/30 bg-amber-950/20 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-amber-300 flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              Mobile / Tablet Free GPU:
+            </span>
+            <span className="text-[10px] text-amber-400/80 font-mono">15GB RAM + T4 GPU</span>
+          </div>
+          <p className="text-[11px] text-slate-300 leading-snug">
+            Phone ya tablet se bina laptop ke 1-click me Google Colab GPU notebook start karein:
+          </p>
+          <a
+            href="https://colab.research.google.com/github/Deependra1010verma/FaceFlux/blob/master/scripts/FaceFlux_Colab_GPU.ipynb"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-center gap-2 w-full py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-xs transition shadow-md shadow-amber-950/40"
+          >
+            <span>🚀 Open Google Colab GPU (1-Click)</span>
+          </a>
+          <p className="text-[10px] text-slate-400">
+            Notebook me bas <strong>Runtime → Run all</strong> dabayein, aakhri me auto-connect link mil jayega!
+          </p>
+        </div>
+
         {/* URL Input */}
         <div className="space-y-2">
           <label className="text-xs font-semibold uppercase tracking-wider text-slate-400">

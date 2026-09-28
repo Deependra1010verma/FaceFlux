@@ -5,6 +5,7 @@ import {
   cancelJob,
   createJob,
   fetchSystemInfo,
+  setApiBaseUrl,
   streamJobProgress,
   uploadFace,
   uploadVideo,
@@ -46,6 +47,16 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const serverParam = params.get("server");
+      if (serverParam && serverParam.trim()) {
+        setApiBaseUrl(serverParam.trim());
+        // Clean URL in address bar without reload
+        const newUrl = window.location.pathname;
+        window.history.replaceState({}, document.title, newUrl);
+      }
+    }
     loadSystemInfo();
   }, [loadSystemInfo]);
 
