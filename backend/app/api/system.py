@@ -27,12 +27,16 @@ class SystemInfoResponse(BaseModel):
 async def system_info() -> SystemInfoResponse:
     hw = hardware_service.summary()
 
-    # Check if gfpgan is importable
+    # Check if GPEN face enhancer model is available
     try:
-        import gfpgan  # noqa: F401
-        gfpgan_ok = True
-    except ImportError:
-        gfpgan_ok = False
+        from app.pipelines.face_enhancer import face_enhancer
+        enhancer_ok = face_enhancer.is_available
+    except Exception:
+        # Direct file check fallback
+        enhancer_ok = (
+            (settings.model_dir / "GPEN-BFR-512.onnx").exists()
+            or (settings.model_dir / "GPEN-BFR-256.onnx").exists()
+        )
 
     return SystemInfoResponse(
         cpu=hw["cpu"],
@@ -45,5 +49,5 @@ async def system_info() -> SystemInfoResponse:
         output_dir=str(settings.output_dir),
         max_video_size_mb=settings.max_video_size_mb,
         default_quality=settings.default_quality,
-        gfpgan_available=gfpgan_ok,
+        gfpgan_available=enhancer_ok,
     )
