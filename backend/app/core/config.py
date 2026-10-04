@@ -96,6 +96,15 @@ class Settings:
     det_size:             int   = _int("DET_SIZE",              640)
     face_score_threshold: float = _float("FACE_SCORE_THRESHOLD", 0.5)
 
+    # ─── Face Enhancer (GPEN ONNX) ───────────────────────────────────────────
+    # Preferred model: "gpen_512" (best quality) | "gpen_256" (faster) | "gfpgan"
+    enhancer_model:    str   = _str(  "ENHANCER_MODEL",    "gpen_512")
+    # Fidelity: 0.0 = max enhancement, 1.0 = max fidelity to original
+    # 0.8 is a good balance — strong sharpening, still looks natural
+    enhancer_fidelity: float = _float("ENHANCER_FIDELITY", 0.8)
+    # Color correction: match skin tone of swapped face to target
+    color_correction:  bool  = os.environ.get("COLOR_CORRECTION", "true").lower() != "false"
+
     # Cloud & Remote GPU Settings
     hf_token:             str = _str("HF_TOKEN", "")
     colab_gpu_url:        str = _str("COLAB_GPU_URL", "")

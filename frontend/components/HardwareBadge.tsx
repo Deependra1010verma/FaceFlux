@@ -96,20 +96,23 @@ export function HardwareBadge({ info }: HardwareBadgeProps) {
         </div>
       </div>
 
-      {/* CodeFormer status */}
+      {/* Enhancement status */}
       <div className="pt-1 border-t border-slate-800 flex items-center gap-2">
         {info.gfpgan_available ? (
           <>
             <CheckCircle className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
             <span className="text-[11px] text-emerald-400">
-              Face Enhancement ready (CodeFormer / Torch)
+              GPEN ONNX Enhancer ready — sharpens swapped faces automatically
             </span>
           </>
         ) : (
           <>
-            <XCircle className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
-            <span className="text-[11px] text-slate-400">
-              Face Enhancement optional (requires basicsr)
+            <XCircle className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
+            <span className="text-[11px] text-amber-400">
+              GPEN model not found — run{" "}
+              <code className="bg-slate-800 px-1 rounded text-[10px]">
+                bash scripts/download-models.sh
+              </code>
             </span>
           </>
         )}
