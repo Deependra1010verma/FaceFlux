@@ -172,27 +172,87 @@ export function streamJobProgress(
   onDone: () => void,
   onError: (err: Error) => void
 ): () => void {
-  const es = new EventSource(`${getApiBaseUrl()}/jobs/${jobId}/stream`);
+  let es: EventSource | null = null;
+  let stopped = false;
+  let retryCount = 0;
+  const MAX_RETRIES = 8;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
-  es.onmessage = (event) => {
+  function connect() {
+    if (stopped) return;
+
+    es = new EventSource(`${getApiBaseUrl()}/jobs/${jobId}/stream`);
+
+    es.onmessage = (event) => {
+      retryCount = 0; // reset on successful message
+      try {
+        const data = JSON.parse(event.data) as JobProgress;
+        onMessage(data);
+        if (data.status === "COMPLETED" || data.status === "FAILED" || data.status === "CANCELLED") {
+          stopped = true;
+          es?.close();
+          onDone();
+        }
+      } catch {
+        onError(new Error("Failed to parse SSE message"));
+      }
+    };
+
+    es.onerror = () => {
+      es?.close();
+      if (stopped) return;
+
+      if (retryCount >= MAX_RETRIES) {
+        // Fallback: poll via HTTP every 2s
+        stopped = true;
+        _pollFallback(jobId, onMessage, onDone, onError);
+        return;
+      }
+
+      // Exponential backoff: 1s, 2s, 4s, 8s ... up to 16s
+      const delay = Math.min(1000 * Math.pow(2, retryCount), 16000);
+      retryCount++;
+      retryTimer = setTimeout(connect, delay);
+    };
+  }
+
+  connect();
+
+  return () => {
+    stopped = true;
+    if (retryTimer) clearTimeout(retryTimer);
+    es?.close();
+  };
+}
+
+/** HTTP polling fallback when SSE keeps failing */
+async function _pollFallback(
+  jobId: string,
+  onMessage: (progress: JobProgress) => void,
+  onDone: () => void,
+  onError: (err: Error) => void
+): Promise<void> {
+  let attempts = 0;
+  const MAX_POLL = 300; // 300 * 2s = 10 min max
+
+  while (attempts < MAX_POLL) {
+    await new Promise((r) => setTimeout(r, 2000));
     try {
-      const data = JSON.parse(event.data) as JobProgress;
+      const data = await apiRequest<JobProgress>(`/jobs/${jobId}/progress`);
       onMessage(data);
       if (data.status === "COMPLETED" || data.status === "FAILED" || data.status === "CANCELLED") {
-        es.close();
         onDone();
+        return;
       }
-    } catch {
-      onError(new Error("Failed to parse SSE message"));
+    } catch (e) {
+      if (attempts > 5) {
+        onError(e instanceof Error ? e : new Error("Poll failed"));
+        return;
+      }
     }
-  };
-
-  es.onerror = () => {
-    es.close();
-    onError(new Error("SSE connection error"));
-  };
-
-  return () => es.close();
+    attempts++;
+  }
+  onError(new Error("Job timed out after 10 minutes of polling"));
 }
 
 // ── Generate (Image → Video) ──────────────────────────────────────────────────

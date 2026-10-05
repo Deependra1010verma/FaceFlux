@@ -57,6 +57,7 @@ export interface FaceInfo {
   bbox: [number, number, number, number];
   score: number;
   thumbnail_b64: string | null;
+  angle_warning?: string | null;
 }
 
 export interface VideoMeta {

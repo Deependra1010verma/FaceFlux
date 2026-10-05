@@ -315,6 +315,12 @@ async def process_video(job: Job, update_progress: ProgressCallback) -> str:
                     logger.info("job_cancelled", frame=frame_idx)
                     raise InterruptedError("Job cancelled by user.")
 
+                # ── Scene change detection ────────────────────────────────────
+                if last_raw_frame is not None and _scene_changed(last_raw_frame, frame):
+                    bbox_history.clear()
+                    last_target_face = None
+                    prev_output_frame = None
+
                 # ── Face detection with caching ───────────────────────────────
                 if frame_idx % sample_rate == 0:
                     faces = face_detector.detect_in_image(frame)
@@ -358,7 +364,7 @@ async def process_video(job: Job, update_progress: ProgressCallback) -> str:
                     for out_frame in processed:
                         # ── Temporal consistency: blend with previous output frame ──
                         # Reduces flicker caused by per-frame GPEN enhancement variance
-                        if prev_output_frame is not None and not scene_changed:
+                        if prev_output_frame is not None:
                             out_frame = cv2.addWeighted(
                                 out_frame, 0.85,
                                 prev_output_frame, 0.15,
@@ -384,7 +390,7 @@ async def process_video(job: Job, update_progress: ProgressCallback) -> str:
             if frame_buffer:
                 processed = flush_batch(frame_buffer)
                 for out_frame in processed:
-                    if prev_output_frame is not None and not scene_changed:
+                    if prev_output_frame is not None:
                         out_frame = cv2.addWeighted(
                             out_frame, 0.85,
                             prev_output_frame, 0.15,

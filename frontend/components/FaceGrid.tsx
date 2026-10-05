@@ -2,7 +2,7 @@
 
 import { FaceInfo } from "@/types";
 import { motion, AnimatePresence } from "@/lib/motion-shim";
-import { CheckCircle2, User } from "lucide-react";
+import { AlertTriangle, CheckCircle2, User } from "lucide-react";
 
 interface FaceGridProps {
   faces: FaceInfo[];
@@ -12,6 +12,8 @@ interface FaceGridProps {
 
 export function FaceGrid({ faces, selectedIndex, onSelect }: FaceGridProps) {
   if (faces.length === 0) return null;
+
+  const selectedFace = faces.find((f) => f.index === selectedIndex) || faces[0];
 
   return (
     <motion.div
@@ -42,7 +44,7 @@ export function FaceGrid({ faces, selectedIndex, onSelect }: FaceGridProps) {
                 onClick={() => onSelect(face.index)}
                 whileHover={{ scale: 1.04 }}
                 whileTap={{ scale: 0.96 }}
-                data-tooltip={`Face ${face.index + 1} · ${confidencePct}% confidence`}
+                data-tooltip={face.angle_warning || `Face ${face.index + 1} · ${confidencePct}% confidence`}
                 className={`relative flex flex-col items-center gap-1.5 p-2 rounded-xl border-2 transition-colors duration-200 cursor-pointer
                   ${
                     isSelected
@@ -52,18 +54,30 @@ export function FaceGrid({ faces, selectedIndex, onSelect }: FaceGridProps) {
                 `}
               >
                 {/* Face thumbnail */}
-                {face.thumbnail_b64 ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={`data:image/jpeg;base64,${face.thumbnail_b64}`}
-                    alt={`Face ${face.index + 1}`}
-                    className="w-16 h-16 rounded-lg object-cover"
-                  />
-                ) : (
-                  <div className="w-16 h-16 rounded-lg bg-slate-700 flex items-center justify-center">
-                    <User className="w-7 h-7 text-slate-500" />
-                  </div>
-                )}
+                <div className="relative">
+                  {face.thumbnail_b64 ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={`data:image/jpeg;base64,${face.thumbnail_b64}`}
+                      alt={`Face ${face.index + 1}`}
+                      className="w-16 h-16 rounded-lg object-cover"
+                    />
+                  ) : (
+                    <div className="w-16 h-16 rounded-lg bg-slate-700 flex items-center justify-center">
+                      <User className="w-7 h-7 text-slate-500" />
+                    </div>
+                  )}
+
+                  {/* Angle warning badge on thumbnail */}
+                  {face.angle_warning && (
+                    <div
+                      className="absolute bottom-1 right-1 p-0.5 rounded bg-amber-950/80 border border-amber-600/70 text-amber-400"
+                      title={face.angle_warning}
+                    >
+                      <AlertTriangle className="w-3 h-3 text-amber-400" />
+                    </div>
+                  )}
+                </div>
 
                 {/* Confidence bar */}
                 <div className="w-full h-1 rounded-full bg-slate-700 overflow-hidden">
@@ -101,6 +115,23 @@ export function FaceGrid({ faces, selectedIndex, onSelect }: FaceGridProps) {
         </AnimatePresence>
       </div>
 
+      {/* Selected Face Angle Warning Banner */}
+      <AnimatePresence>
+        {selectedFace?.angle_warning && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="flex items-center gap-2 p-2 rounded-lg bg-amber-950/30 border border-amber-800/40 text-amber-300 text-[11px]"
+          >
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
+            <span>
+              <strong>Tip:</strong> Face {selectedFace.index + 1} side angle par hai. Face swap frontal photos ke sath sabse natural lagta hai.
+            </span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {faces.length > 1 && (
         <p className="text-xs text-slate-500">
           ↑ Multiple faces detected — click to select which face to replace
@@ -109,3 +140,4 @@ export function FaceGrid({ faces, selectedIndex, onSelect }: FaceGridProps) {
     </motion.div>
   );
 }
+

@@ -272,6 +272,39 @@ export default function HomePage() {
   const isProcessing = stage === "processing" || stage === "uploading";
   const canStart = !!videoFile && faceFiles.length > 0 && stage === "idle" && !backendError;
 
+  // ── Keyboard shortcuts ─────────────────────────────────────────────────────
+  // Placed after all handlers so they are defined when the effect runs.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+
+      // Ctrl+Enter / Cmd+Enter → Start swap
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        e.preventDefault();
+        if (stage === "idle" || stage === "error") handleStart();
+      }
+      // Escape → Cancel running job
+      if (e.key === "Escape" && (stage === "processing" || stage === "uploading")) {
+        e.preventDefault();
+        handleCancel();
+      }
+      // R → Reset (only when done/error)
+      if (e.key === "r" && !e.ctrlKey && !e.metaKey && (stage === "done" || stage === "error")) {
+        e.preventDefault();
+        handleReset();
+      }
+      // 1 / 2 / 3 → Switch tabs
+      if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (e.key === "1") setActiveTab("swap");
+        if (e.key === "2") setActiveTab("generate");
+        if (e.key === "3") setActiveTab("tryon");
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [stage, handleStart, handleCancel, handleReset]);
+
   return (
     <main className="min-h-screen bg-slate-950 text-white">
 

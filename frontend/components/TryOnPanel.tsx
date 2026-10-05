@@ -11,6 +11,7 @@ import {
 } from "@/lib/api";
 import type { TryOnJob } from "@/types";
 import { DropZone } from "./DropZone";
+import { motion, AnimatePresence } from "@/lib/motion-shim";
 import {
   AlertCircle,
   CheckCircle2,
@@ -23,6 +24,7 @@ import {
 } from "lucide-react";
 
 type Stage = "idle" | "uploading" | "processing" | "done" | "error";
+
 
 export function TryOnPanel() {
   const [videoFile, setVideoFile] = useState<File | null>(null);
@@ -132,10 +134,20 @@ export function TryOnPanel() {
   const canStart = !!videoFile && !!clothingFile && !isRunning;
 
   return (
-    <div className="space-y-5">
+    <motion.div
+      className="space-y-5"
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3 }}
+    >
 
       {/* Info Banner */}
-      <div className="flex items-start gap-3 p-3 rounded-xl bg-violet-950/40 border border-violet-800/50">
+      <motion.div
+        className="flex items-start gap-3 p-3 rounded-xl bg-violet-950/40 border border-violet-800/50"
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.05 }}
+      >
         <Shirt className="w-4 h-4 text-violet-400 flex-shrink-0 mt-0.5" />
         <div className="text-xs text-violet-300 space-y-1">
           <p className="font-semibold">Virtual Try-On — Photo ke Clothes Video mein</p>
@@ -144,18 +156,28 @@ export function TryOnPanel() {
             Cloud pe process hoga, koi GPU nahi chahiye.
           </p>
         </div>
-      </div>
+      </motion.div>
 
       {/* Warning about processing time */}
-      <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-950/30 border border-amber-800/40">
+      <motion.div
+        className="flex items-start gap-2 p-3 rounded-xl bg-amber-950/30 border border-amber-800/40"
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.1 }}
+      >
         <Info className="w-3.5 h-3.5 text-amber-500 flex-shrink-0 mt-0.5" />
         <p className="text-[11px] text-amber-400">
           <strong>Note:</strong> Yeh feature HuggingFace Spaces use karta hai jo kabhi busy hoti hain.
           Processing mein 5–20 min lag sakte hain. Short videos (under 15 sec) best results dete hain.
         </p>
-      </div>
+      </motion.div>
 
-      <div className="rounded-2xl bg-slate-900 border border-slate-800 p-6 space-y-5">
+      <motion.div
+        className="rounded-2xl bg-slate-900 border border-slate-800 p-6 space-y-5"
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.15 }}
+      >
 
         {/* Uploads */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -189,118 +211,171 @@ export function TryOnPanel() {
         </div>
 
         {/* Error */}
-        {error && !isRunning && (
-          <div className="flex items-start gap-3 p-3 rounded-lg bg-red-950/50 border border-red-800">
-            <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
-            <p className="text-sm text-red-300">{error}</p>
-          </div>
-        )}
+        <AnimatePresence>
+          {error && !isRunning && (
+            <motion.div
+              className="flex items-start gap-3 p-3 rounded-lg bg-red-950/50 border border-red-800"
+              initial={{ opacity: 0, height: 0, y: -8 }}
+              animate={{ opacity: 1, height: "auto", y: 0 }}
+              exit={{ opacity: 0, height: 0 }}
+            >
+              <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+              <p className="text-sm text-red-300">{error}</p>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Action buttons */}
         <div className="flex gap-3">
-          {stage === "idle" || stage === "error" ? (
-            <button
-              onClick={handleStart}
-              disabled={!canStart}
-              className={`flex items-center justify-center gap-2 flex-1 py-3 px-6 rounded-xl font-semibold text-sm transition-all duration-200 ${
-                canStart
-                  ? "bg-violet-600 hover:bg-violet-500 text-white shadow-lg shadow-violet-500/20 active:scale-[0.98]"
-                  : "bg-slate-800 text-slate-500 cursor-not-allowed"
-              }`}
-            >
-              <Shirt className="w-4 h-4" />
-              Try-On Start Karo
-            </button>
-          ) : isRunning ? (
-            <button
-              onClick={handleCancel}
-              className="flex items-center justify-center gap-2 flex-1 py-3 px-6 rounded-xl font-semibold text-sm bg-red-700 hover:bg-red-600 text-white transition-colors active:scale-[0.98]"
-            >
-              <XCircle className="w-4 h-4" />
-              Cancel
-            </button>
-          ) : (
-            <button
-              onClick={handleReset}
-              className="flex items-center justify-center gap-2 flex-1 py-3 px-6 rounded-xl font-semibold text-sm bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors"
-            >
-              <RefreshCw className="w-4 h-4" />
-              Naya Try-On Karo
-            </button>
-          )}
+          <AnimatePresence mode="wait">
+            {stage === "idle" || stage === "error" ? (
+              <motion.button
+                key="start"
+                type="button"
+                onClick={handleStart}
+                disabled={!canStart}
+                whileHover={canStart ? { scale: 1.02 } : {}}
+                whileTap={canStart ? { scale: 0.97 } : {}}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className={`flex items-center justify-center gap-2 flex-1 py-3 px-6 rounded-xl font-semibold text-sm transition-all duration-200 ${
+                  canStart
+                    ? "bg-violet-600 hover:bg-violet-500 text-white shadow-lg shadow-violet-500/20"
+                    : "bg-slate-800 text-slate-500 cursor-not-allowed"
+                }`}
+              >
+                <Shirt className="w-4 h-4" />
+                Try-On Start Karo
+              </motion.button>
+            ) : isRunning ? (
+              <motion.button
+                key="cancel"
+                type="button"
+                onClick={handleCancel}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.97 }}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="flex items-center justify-center gap-2 flex-1 py-3 px-6 rounded-xl font-semibold text-sm bg-red-700 hover:bg-red-600 text-white transition-colors"
+              >
+                <XCircle className="w-4 h-4" />
+                Cancel
+              </motion.button>
+            ) : (
+              <motion.button
+                key="reset"
+                type="button"
+                onClick={handleReset}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.97 }}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="flex items-center justify-center gap-2 flex-1 py-3 px-6 rounded-xl font-semibold text-sm bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Naya Try-On Karo
+              </motion.button>
+            )}
+          </AnimatePresence>
         </div>
 
         {/* Upload spinner */}
-        {stage === "uploading" && (
-          <div className="flex items-center gap-3 p-3 rounded-lg bg-slate-800/50 border border-slate-700">
-            <Loader2 className="w-4 h-4 animate-spin text-violet-400 flex-shrink-0" />
-            <span className="text-sm text-slate-400">{uploadMsg}</span>
-          </div>
-        )}
-      </div>
+        <AnimatePresence>
+          {stage === "uploading" && (
+            <motion.div
+              className="flex items-center gap-3 p-3 rounded-lg bg-slate-800/50 border border-slate-700"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+            >
+              <Loader2 className="w-4 h-4 animate-spin text-violet-400 flex-shrink-0" />
+              <span className="text-sm text-slate-400">{uploadMsg}</span>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </motion.div>
 
       {/* Progress */}
-      {tryOnJob && (stage === "processing" || stage === "done" || stage === "error") && (
-        <div className="rounded-2xl bg-slate-900 border border-slate-800 p-6 space-y-4">
-          <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-            Try-On Status
-          </h2>
+      <AnimatePresence>
+        {tryOnJob && (stage === "processing" || stage === "done" || stage === "error") && (
+          <motion.div
+            className="rounded-2xl bg-slate-900 border border-slate-800 p-6 space-y-4"
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+          >
+            <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+              Try-On Status
+            </h2>
 
-          <div className="space-y-2">
-            <div className="flex justify-between items-center">
-              <span className="text-sm text-slate-300">{tryOnJob.stage_message}</span>
-              <span className="text-xs font-bold text-violet-400">{tryOnJob.progress}%</span>
-            </div>
-            <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all duration-500 ${
-                  tryOnJob.status === "FAILED"
-                    ? "bg-red-500"
-                    : tryOnJob.status === "COMPLETED"
-                    ? "bg-emerald-500"
-                    : "bg-violet-500"
-                }`}
-                style={{ width: `${tryOnJob.progress}%` }}
-              />
-            </div>
-            {tryOnJob.total_frames > 0 && (
-              <p className="text-[11px] text-slate-600">
-                Frames: {tryOnJob.processed_frames} / {tryOnJob.total_frames} processed
-              </p>
-            )}
-          </div>
-
-          {/* Output */}
-          {stage === "done" && tryOnJob.output_ready && (
-            <div className="space-y-3 pt-2 border-t border-slate-800">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                <span className="text-sm font-semibold text-emerald-300">Try-On video ready hai!</span>
+            <div className="space-y-2">
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-slate-300">{tryOnJob.stage_message}</span>
+                <span className="text-xs font-bold text-violet-400">{tryOnJob.progress}%</span>
               </div>
-              <video
-                src={getTryOnOutputUrl(tryOnJob.job_id)}
-                controls
-                autoPlay
-                loop
-                className="w-full rounded-xl border border-slate-700 bg-slate-950 max-h-64 object-contain"
-              />
-              <a
-                href={getTryOnOutputUrl(tryOnJob.job_id)}
-                download={`faceflux_tryon_${tryOnJob.job_id}.mp4`}
-                className="flex items-center justify-center gap-2 w-full py-2.5 px-5 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-semibold transition-colors"
-              >
-                <Download className="w-4 h-4" />
-                Download Video
-              </a>
+              <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+                <motion.div
+                  className={`h-full rounded-full ${
+                    tryOnJob.status === "FAILED"
+                      ? "bg-red-500"
+                      : tryOnJob.status === "COMPLETED"
+                      ? "bg-emerald-500"
+                      : "bg-violet-500"
+                  }`}
+                  style={{ width: `${tryOnJob.progress}%` }}
+                  transition={{ duration: 0.4, ease: "easeOut" }}
+                />
+              </div>
+              {tryOnJob.total_frames > 0 && (
+                <p className="text-[11px] text-slate-500">
+                  Frames: <span className="text-slate-300 font-semibold">{tryOnJob.processed_frames}</span> / {tryOnJob.total_frames} processed
+                </p>
+              )}
             </div>
-          )}
-        </div>
-      )}
+
+            {/* Output */}
+            <AnimatePresence>
+              {stage === "done" && tryOnJob.output_ready && (
+                <motion.div
+                  className="space-y-3 pt-2 border-t border-slate-800"
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                >
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                    <span className="text-sm font-semibold text-emerald-300">Try-On video ready hai!</span>
+                  </div>
+                  <video
+                    src={getTryOnOutputUrl(tryOnJob.job_id)}
+                    controls
+                    autoPlay
+                    loop
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 max-h-64 object-contain"
+                  />
+                  <motion.a
+                    href={getTryOnOutputUrl(tryOnJob.job_id)}
+                    download={`faceflux_tryon_${tryOnJob.job_id}.mp4`}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.97 }}
+                    className="flex items-center justify-center gap-2 w-full py-2.5 px-5 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-semibold transition-colors"
+                  >
+                    <Download className="w-4 h-4" />
+                    Download Video
+                  </motion.a>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Footer note */}
       <p className="text-center text-xs text-slate-700">
         Powered by IDM-VTON · CatVTON · OOTDiffusion via HuggingFace Spaces · Free
       </p>
-    </div>
+    </motion.div>
   );
 }
