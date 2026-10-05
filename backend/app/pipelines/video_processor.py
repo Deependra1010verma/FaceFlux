@@ -267,7 +267,8 @@ async def process_video(job: Job, update_progress: ProgressCallback) -> str:
         frame_idx = 0
         swapped_count = 0
         last_target_face = None
-        last_raw_frame = None  # for scene change detection
+        last_raw_frame = None      # for scene change detection
+        prev_output_frame = None   # for temporal consistency blending
         bbox_history: List[list] = []  # for bbox extrapolation
 
         # Batch buffer for parallel processing
@@ -347,13 +348,23 @@ async def process_video(job: Job, update_progress: ProgressCallback) -> str:
                 if last_target_face is not None:
                     frame_buffer.append((frame_idx, frame.copy(), last_target_face))
                 else:
-                    # Write unprocessed frame directly
+                    # Write unprocessed frame directly — reset temporal state
+                    prev_output_frame = None
                     writer.write(frame)
 
                 # Flush batch when buffer is full
                 if len(frame_buffer) >= BATCH_SIZE:
                     processed = flush_batch(frame_buffer)
                     for out_frame in processed:
+                        # ── Temporal consistency: blend with previous output frame ──
+                        # Reduces flicker caused by per-frame GPEN enhancement variance
+                        if prev_output_frame is not None and not scene_changed:
+                            out_frame = cv2.addWeighted(
+                                out_frame, 0.85,
+                                prev_output_frame, 0.15,
+                                0,
+                            )
+                        prev_output_frame = out_frame
                         writer.write(out_frame)
                     frame_buffer.clear()
 
@@ -373,6 +384,13 @@ async def process_video(job: Job, update_progress: ProgressCallback) -> str:
             if frame_buffer:
                 processed = flush_batch(frame_buffer)
                 for out_frame in processed:
+                    if prev_output_frame is not None and not scene_changed:
+                        out_frame = cv2.addWeighted(
+                            out_frame, 0.85,
+                            prev_output_frame, 0.15,
+                            0,
+                        )
+                    prev_output_frame = out_frame
                     writer.write(out_frame)
 
         finally:
@@ -389,7 +407,9 @@ async def process_video(job: Job, update_progress: ProgressCallback) -> str:
 
         # ── Step 5: Encode final output ───────────────────────────────────────
         update_progress(JobStatus.ENCODING, 90, "Encoding final video...")
-        output_path = settings.output_dir / f"{job_id}_output.mp4"
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_path = settings.output_dir / f"faceswap_{timestamp}_{quality}_{job_id[:8]}.mp4"
 
         mux_audio_video(
             frames_video=raw_output,

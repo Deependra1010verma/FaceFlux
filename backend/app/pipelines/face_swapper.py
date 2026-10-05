@@ -83,15 +83,22 @@ class FaceSwapper:
         if len(source_faces) == 1:
             return source_faces[0]
 
-        embeddings = [
-            f.embedding for f in source_faces 
-            if hasattr(f, "embedding") and f.embedding is not None
-        ]
+        embeddings = []
+        weights = []
+        for f in source_faces:
+            if hasattr(f, "embedding") and f.embedding is not None:
+                embeddings.append(f.embedding)
+                # Use detection confidence score as weight — higher score = sharper, frontal photo
+                weights.append(float(getattr(f, "det_score", 1.0)))
+
         if not embeddings:
             return source_faces[0]
 
         import copy
-        mean_emb = np.mean(embeddings, axis=0)
+        # Score-weighted average: low-confidence photos (blurry/angled) get less weight
+        weights_arr = np.array(weights, dtype=np.float32)
+        weights_arr = weights_arr / weights_arr.sum()  # normalize to sum=1
+        mean_emb = np.average(np.stack(embeddings), axis=0, weights=weights_arr)
         norm = np.linalg.norm(mean_emb)
         normed_emb = mean_emb / norm if norm > 0 else mean_emb
 
@@ -100,7 +107,8 @@ class FaceSwapper:
         if hasattr(fused_face, "normed_embedding"):
             fused_face.normed_embedding = normed_emb
 
-        logger.info("source_faces_fused", count=len(embeddings))
+        logger.info("source_faces_fused", count=len(embeddings),
+                    weights=[round(w, 3) for w in weights_arr.tolist()])
         return fused_face
 
     def swap(

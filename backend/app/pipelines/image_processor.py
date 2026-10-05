@@ -130,7 +130,9 @@ async def process_image(job: Job, update_progress: ProgressCallback) -> str:
         settings.output_dir.mkdir(parents=True, exist_ok=True)
         suffix = target_img_path.suffix.lower()
         ext = suffix if suffix in (".jpg", ".jpeg", ".png", ".webp") else ".jpg"
-        output_path = settings.output_dir / f"{job_id}_output{ext}"
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_path = settings.output_dir / f"faceswap_{timestamp}_{job_id[:8]}{ext}"
 
         encode_params = []
         if ext in (".jpg", ".jpeg"):

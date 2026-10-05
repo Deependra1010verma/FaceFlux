@@ -280,3 +280,60 @@ def cleanup_temp_files(max_age_hours: float = 24.0) -> int:
     if deleted > 0:
         logger.info("temp_dirs_cleaned", count=deleted)
     return deleted
+
+
+def cleanup_upload_files(max_age_hours: float = 6.0) -> int:
+    """
+    Delete orphaned upload files in data/uploads/ older than max_age_hours.
+
+    Uploads are temporary — once a job is created, the file is copied to
+    the processing pipeline. Leftover uploads (e.g. from failed/cancelled jobs
+    or abandoned sessions) accumulate silently and waste disk space.
+
+    Strategy:
+      - Keep files that have an active job referencing them (QUEUED / processing)
+      - Delete everything older than max_age_hours regardless
+    Returns number of files deleted.
+    """
+    upload_root = settings.upload_dir
+    if not upload_root.exists():
+        return 0
+
+    cutoff = time.time() - (max_age_hours * 3600)
+
+    # Collect paths still referenced by active jobs (don't delete these)
+    active_paths: set = set()
+    try:
+        active_statuses = {
+            "QUEUED", "ANALYZING", "DETECTING", "TRACKING",
+            "SWAPPING", "ENHANCING", "ENCODING",
+        }
+        jobs = list_jobs()
+        for job in jobs:
+            if job.status.value in active_statuses:
+                # Add any upload paths the job might reference
+                d = _job_to_dict(job)
+                for key in ("video_path", "face_paths", "image_path"):
+                    val = d.get(key)
+                    if isinstance(val, str):
+                        active_paths.add(val)
+                    elif isinstance(val, list):
+                        active_paths.update(val)
+    except Exception:
+        pass  # If we can't read jobs, be conservative — don't delete
+
+    deleted = 0
+    for item in upload_root.iterdir():
+        if not item.is_file():
+            continue
+        try:
+            mtime = item.stat().st_mtime
+            if mtime < cutoff and str(item) not in active_paths:
+                item.unlink()
+                deleted += 1
+        except Exception as e:
+            logger.warning("upload_cleanup_failed", path=str(item), error=str(e))
+
+    if deleted > 0:
+        logger.info("upload_files_cleaned", count=deleted)
+    return deleted

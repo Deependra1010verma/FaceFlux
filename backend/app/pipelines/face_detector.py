@@ -98,12 +98,31 @@ class FaceDetector:
             except Exception:
                 pass
 
+            # Detect extreme side angle (>35° yaw)
+            angle_warning = None
+            try:
+                yaw = None
+                if hasattr(face, "pose") and face.pose is not None:
+                    yaw = float(face.pose[1])
+                elif hasattr(face, "kps") and face.kps is not None and len(face.kps) >= 5:
+                    d_left = abs(float(face.kps[2][0] - face.kps[0][0]))
+                    d_right = abs(float(face.kps[1][0] - face.kps[2][0]))
+                    if (d_left + d_right) > 0:
+                        ratio = (d_right - d_left) / (d_left + d_right)
+                        yaw = ratio * 90.0
+
+                if yaw is not None and abs(yaw) > 35:
+                    angle_warning = f"Side angle detected (~{int(abs(yaw))}°). Frontal faces give best swap."
+            except Exception:
+                pass
+
             results.append(
                 FaceInfo(
                     index=i,
                     bbox=[float(x1), float(y1), float(x2), float(y2)],
                     score=float(face.det_score),
                     thumbnail_b64=thumbnail_b64,
+                    angle_warning=angle_warning,
                 )
             )
         return results

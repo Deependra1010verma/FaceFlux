@@ -23,6 +23,7 @@ class FaceInfo(BaseModel):
     bbox: List[float]           # [x1, y1, x2, y2]
     score: float
     thumbnail_b64: Optional[str] = None   # base64 JPEG thumbnail
+    angle_warning: Optional[str] = None   # Warning if side-profile (>35° yaw)
 
 
 class VideoMeta(BaseModel):
