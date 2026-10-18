@@ -11,6 +11,7 @@ License note:
 
 from pathlib import Path
 from typing import Optional
+import platform
 import urllib.request
 import numpy as np
 import cv2
@@ -20,6 +21,16 @@ from app.core.logger import get_logger
 from app.services.hardware import hardware_service
 
 logger = get_logger(__name__)
+
+# CoreML compiled model cache for inswapper_128.
+# On first Mac run, CoreML compiles the 529MB model (~3-4 min).
+# Cached blob reused on all subsequent runs — instant load.
+_COREML_CACHE_DIR = str(Path(".coreml_cache") / "swapper")
+
+
+def _is_apple_silicon() -> bool:
+    """True when running natively on Apple Silicon (arm64 macOS)."""
+    return platform.system() == "Darwin" and platform.machine() == "arm64"
 
 INSWAPPER_URL = (
     "https://github.com/deepinsight/insightface/releases/download/model-zoo/inswapper_128.onnx"
@@ -62,13 +73,42 @@ class FaceSwapper:
         self._ensure_model()
         try:
             import insightface
-            providers = hardware_service.get_onnx_providers()
-            self._swapper = insightface.model_zoo.get_model(
-                str(self._model_path()),
-                providers=providers,
-            )
-            # Note: INSwapper uses the ONNX providers directly and does not have a prepare() method
-            logger.info("face_swapper_loaded", provider=providers[0])
+            model_path = self._model_path()
+
+            if _is_apple_silicon():
+                # ── Apple Silicon: CoreML with compiled model cache ─────────────
+                # InsightFace's get_model() accepts provider_options as a list
+                # parallel to providers — index 0 options → index 0 provider.
+                # CoreML compiles inswapper_128 to Metal on first run (~3-4 min)
+                # then caches the blob so subsequent restarts are instant.
+                Path(_COREML_CACHE_DIR).mkdir(parents=True, exist_ok=True)
+                providers = ["CoreMLExecutionProvider", "CPUExecutionProvider"]
+                provider_options = [
+                    {
+                        "ModelCacheDirectory": _COREML_CACHE_DIR,
+                        "MLComputeUnits": "0",  # 0 = ALL (ANE + GPU + CPU)
+                    },
+                    {},  # no options for CPU fallback
+                ]
+                self._swapper = insightface.model_zoo.get_model(
+                    str(model_path),
+                    providers=providers,
+                    provider_options=provider_options,
+                )
+                logger.info(
+                    "face_swapper_loaded",
+                    provider="CoreMLExecutionProvider",
+                    cache_dir=_COREML_CACHE_DIR,
+                )
+            else:
+                # ── Linux / Windows: hardware_service auto-selects CUDA / CPU ──
+                providers = hardware_service.get_onnx_providers()
+                self._swapper = insightface.model_zoo.get_model(
+                    str(model_path),
+                    providers=providers,
+                )
+                logger.info("face_swapper_loaded", provider=providers[0])
+
         except Exception as e:
             raise RuntimeError(f"Failed to load FaceSwapper: {e}") from e
 

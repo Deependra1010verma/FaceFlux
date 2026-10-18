@@ -20,6 +20,7 @@ License:
   GFPGAN: Apache-2.0
 """
 
+import platform
 import threading
 import urllib.request
 import numpy as np
@@ -31,6 +32,15 @@ from app.core.config import settings
 from app.core.logger import get_logger
 
 logger = get_logger(__name__)
+
+# CoreML compiled model cache — avoids ~2-3 min Metal compilation on every cold start.
+# Only used on Apple Silicon (arm64 macOS). Ignored on Linux/Windows.
+_COREML_CACHE_DIR = str(Path(".coreml_cache") / "enhancer")
+
+
+def _is_apple_silicon() -> bool:
+    """True when running natively on Apple Silicon (arm64 macOS)."""
+    return platform.system() == "Darwin" and platform.machine() == "arm64"
 
 # ── Model registry ─────────────────────────────────────────────────────────────
 # Priority order: try GPEN-512 first, then GPEN-256, then GFPGAN
@@ -156,15 +166,42 @@ class FaceEnhancer:
                 path = self._model_path(model_key)
                 info = ENHANCER_MODELS[model_key]
 
-                # Use GPU if available, else CPU
-                providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
                 sess_options = ort.SessionOptions()
                 sess_options.enable_mem_pattern = True
                 sess_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
 
+                if _is_apple_silicon():
+                    # ── Apple Silicon: CoreML with compiled model cache ─────────
+                    # CoreML compiles GPEN to Metal on first run (~2-3 min).
+                    # ModelCacheDirectory persists the compiled blob so subsequent
+                    # startups skip compilation entirely (instant load).
+                    Path(_COREML_CACHE_DIR).mkdir(parents=True, exist_ok=True)
+                    providers = [
+                        (
+                            "CoreMLExecutionProvider",
+                            {
+                                "ModelCacheDirectory": _COREML_CACHE_DIR,
+                                # MLComputeUnits 0 = ALL (ANE + GPU + CPU)
+                                # ANE is fastest for GPEN's conv layers on M-series.
+                                "MLComputeUnits": "0",
+                            },
+                        ),
+                        "CPUExecutionProvider",
+                    ]
+                    logger.info(
+                        "enhancer_using_coreml",
+                        cache_dir=_COREML_CACHE_DIR,
+                        model=model_key,
+                    )
+                else:
+                    # ── Linux / Windows: CUDA → CPU fallback ──────────────────
+                    providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+
                 try:
                     sess = ort.InferenceSession(str(path), sess_options=sess_options, providers=providers)
                 except Exception:
+                    # Last-resort fallback: pure CPU
+                    logger.warning("enhancer_provider_fallback", model=model_key)
                     sess = ort.InferenceSession(str(path), sess_options=sess_options, providers=["CPUExecutionProvider"])
 
                 self._session = sess
