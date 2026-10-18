@@ -65,6 +65,19 @@ def test_job_not_found(client):
 
 
 def test_job_create_missing_files(client):
+    from app.core.config import settings
+
+    r = client.post(
+        "/jobs",
+        json={
+            "video_upload_id": str(settings.upload_dir / "nonexistent_video.mp4"),
+            "face_upload_id": str(settings.upload_dir / "nonexistent_face.jpg"),
+        },
+    )
+    assert r.status_code == 404
+
+
+def test_job_create_rejects_paths_outside_upload_dir(client):
     r = client.post(
         "/jobs",
         json={
@@ -72,7 +85,60 @@ def test_job_create_missing_files(client):
             "face_upload_id": "/tmp/nonexistent_face.jpg",
         },
     )
-    assert r.status_code == 404
+    assert r.status_code == 400
+
+
+def test_job_create_accepts_multiple_reference_photos(client, monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    from app.core.config import settings
+    from app.core import job_store
+    from app.api import jobs
+
+    async def noop_run_job(job):
+        return None
+
+    monkeypatch.setattr(jobs, "_run_job", noop_run_job)
+    monkeypatch.setitem(sys.modules, "cv2", SimpleNamespace(imread=lambda path: None))
+    monkeypatch.setitem(
+        sys.modules,
+        "app.pipelines.face_detector",
+        SimpleNamespace(
+            face_detector=SimpleNamespace(
+                detect_in_image=lambda image: [],
+                faces_to_face_info=lambda image, faces: [],
+            )
+        ),
+    )
+
+    settings.upload_dir.mkdir(parents=True, exist_ok=True)
+    target = settings.upload_dir / "test_multi_target.jpg"
+    refs = [
+        settings.upload_dir / "test_multi_ref_front.jpg",
+        settings.upload_dir / "test_multi_ref_left.jpg",
+        settings.upload_dir / "test_multi_ref_right.jpg",
+    ]
+    target.write_bytes(b"not-a-real-image")
+    for ref in refs:
+        ref.write_bytes(b"not-a-real-image")
+
+    r = client.post(
+        "/jobs",
+        json={
+            "video_upload_id": str(target),
+            "face_upload_ids": [str(ref) for ref in refs],
+            "target_face_index": 0,
+            "quality": "balanced",
+            "enhance": True,
+        },
+    )
+
+    assert r.status_code == 202
+    created = job_store.get_job(r.json()["job_id"])
+    assert created is not None
+    assert created.face_path == str(refs[0])
+    assert created.face_paths == [str(ref) for ref in refs]
 
 
 # ── FFmpeg ────────────────────────────────────────────────────────────────────

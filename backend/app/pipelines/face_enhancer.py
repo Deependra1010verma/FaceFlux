@@ -20,6 +20,7 @@ License:
   GFPGAN: Apache-2.0
 """
 
+import threading
 import urllib.request
 import numpy as np
 import cv2
@@ -80,6 +81,7 @@ class FaceEnhancer:
         self._model_name: Optional[str] = None
         self._input_size: int = 512
         self._available: Optional[bool] = None  # None = not yet checked
+        self._lock = threading.RLock()
 
     @property
     def is_available(self) -> bool:
@@ -132,52 +134,58 @@ class FaceEnhancer:
 
     def _load(self, preferred: str = "gpen_512") -> bool:
         """Load ONNX session. Returns True if loaded successfully."""
-        if self._session is not None:
-            return True
+        with self._lock:
+            if self._session is not None:
+                return True
 
-        model_key = self._find_available_model()
-        if model_key is None:
-            model_key = self._ensure_model(preferred)
+            model_key = self._find_available_model()
+            if model_key is None:
+                model_key = self._ensure_model(preferred)
 
-        if model_key is None:
-            logger.warning(
-                "enhancer_no_model_available",
-                message="Run 'bash scripts/download-models.sh' to download GPEN model.",
-            )
-            self._available = False
-            return False
+            if model_key is None:
+                logger.warning(
+                    "enhancer_no_model_available",
+                    message="Run 'bash scripts/download-models.sh' to download GPEN model.",
+                )
+                self._available = False
+                return False
 
-        try:
-            import onnxruntime as ort
-
-            path = self._model_path(model_key)
-            info = ENHANCER_MODELS[model_key]
-
-            # Use GPU if available, else CPU
-            providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
             try:
-                sess = ort.InferenceSession(str(path), providers=providers)
-            except Exception:
-                sess = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
+                import onnxruntime as ort
 
-            self._session = sess
-            self._model_name = model_key
-            self._input_size = info["input_size"]
-            self._available = True
+                path = self._model_path(model_key)
+                info = ENHANCER_MODELS[model_key]
 
-            used_provider = sess.get_providers()[0]
-            logger.info(
-                "face_enhancer_loaded",
-                model=model_key,
-                input_size=self._input_size,
-                provider=used_provider,
-            )
-            return True
+                # Use GPU if available, else CPU
+                providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+                sess_options = ort.SessionOptions()
+                sess_options.enable_mem_pattern = True
+                sess_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
 
-        except Exception as e:
-            self._available = False
-            logger.error("face_enhancer_load_failed", model=model_key, error=str(e))
-            return False
+                try:
+                    sess = ort.InferenceSession(str(path), sess_options=sess_options, providers=providers)
+                except Exception:
+                    sess = ort.InferenceSession(str(path), sess_options=sess_options, providers=["CPUExecutionProvider"])
+
+                self._session = sess
+                self._model_name = model_key
+                self._input_size = info["input_size"]
+                self._available = True
+
+                used_provider = sess.get_providers()[0]
+                logger.info(
+                    "face_enhancer_loaded",
+                    model=model_key,
+                    input_size=self._input_size,
+                    provider=used_provider,
+                )
+                return True
+
+            except Exception as e:
+                self._session = None
+                self._available = False
+                logger.error("face_enhancer_load_failed", model=model_key, error=str(e))
+                return False
 
     # ── Face warping helpers ───────────────────────────────────────────────────
 
@@ -261,6 +269,9 @@ class FaceEnhancer:
 
     def _run_gpen(self, face_crop: np.ndarray) -> np.ndarray:
         """Run GPEN ONNX model on a cropped/aligned face. Returns enhanced face."""
+        if self._session is None:
+            raise RuntimeError("Face enhancer session is not loaded.")
+
         size = self._input_size
 
         # Preprocess: BGR → RGB → float32 [-1, 1]
@@ -270,8 +281,11 @@ class FaceEnhancer:
         inp = inp.transpose(2, 0, 1)[np.newaxis]     # (1, 3, H, W)
 
         # Inference
-        input_name = self._session.get_inputs()[0].name
-        outputs = self._session.run(None, {input_name: inp})
+        with self._lock:
+            if self._session is None:
+                raise RuntimeError("Face enhancer session is not loaded.")
+            input_name = self._session.get_inputs()[0].name
+            outputs = self._session.run(None, {input_name: inp})
         out = outputs[0][0]                          # (3, H, W)
 
         # Postprocess: [-1,1] → [0,255] → BGR

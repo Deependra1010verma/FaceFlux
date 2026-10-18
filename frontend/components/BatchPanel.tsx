@@ -11,7 +11,6 @@
 import { useCallback, useRef, useState } from "react";
 import { motion, AnimatePresence } from "@/lib/motion-shim";
 import {
-  CheckCircle2,
   ChevronDown,
   ChevronUp,
   Download,
@@ -44,7 +43,7 @@ interface BatchPanelProps {
   disabled?: boolean;
 }
 
-export function BatchPanel({ facePreviews, faceFiles, quality, enhance, disabled }: BatchPanelProps) {
+export function BatchPanel({ faceFiles, quality, enhance, disabled }: BatchPanelProps) {
   const [expanded, setExpanded] = useState(false);
   const [items, setItems] = useState<BatchItem[]>([]);
   const [running, setRunning] = useState(false);
@@ -89,7 +88,7 @@ export function BatchPanel({ facePreviews, faceFiles, quality, enhance, disabled
     setRunning(true);
 
     // Upload face references once (shared across all batch items)
-    let faceUploadPaths: string[] = [];
+    const faceUploadPaths: string[] = [];
     try {
       for (const f of faceFiles) {
         const resp = await uploadFace(f, () => {});

@@ -62,6 +62,10 @@ export function DropZone({
   const [qualityWarning, setQualityWarning] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const openPicker = useCallback(() => {
+    if (!disabled) inputRef.current?.click();
+  }, [disabled]);
+
   const handleFile = useCallback(
     async (file: File) => {
       setQualityWarning(null);
@@ -145,7 +149,7 @@ export function DropZone({
                 type="button"
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
-                onClick={() => inputRef.current?.click()}
+                onClick={openPicker}
                 className="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-md bg-violet-600/30 hover:bg-violet-600/50 text-violet-300 border border-violet-500/40 transition-colors cursor-pointer"
               >
                 <Plus className="w-3 h-3" />
@@ -179,6 +183,15 @@ export function DropZone({
       </AnimatePresence>
 
       <motion.div
+        role="button"
+        tabIndex={disabled ? -1 : 0}
+        onClick={openPicker}
+        onKeyDown={(e: React.KeyboardEvent<HTMLDivElement>) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            openPicker();
+          }
+        }}
         onDragOver={(e: React.DragEvent<HTMLDivElement>) => {
           e.preventDefault();
           if (!disabled) setDragging(true);
@@ -243,7 +256,7 @@ export function DropZone({
                   type="button"
                   whileHover={{ scale: 1.05, borderColor: "rgb(139 92 246)" }}
                   whileTap={{ scale: 0.95 }}
-                  onClick={(e) => { e.stopPropagation(); inputRef.current?.click(); }}
+                  onClick={(e) => { e.stopPropagation(); openPicker(); }}
                   className="w-16 h-16 rounded-lg border-2 border-dashed border-violet-500/60 bg-violet-950/20 text-violet-300 flex flex-col items-center justify-center gap-1 cursor-pointer shadow-sm"
                 >
                   <Plus className="w-5 h-5 text-violet-400" />
@@ -327,7 +340,7 @@ export function DropZone({
           multiple={multiple}
           onChange={handleChange}
           disabled={disabled}
-          className="absolute inset-0 opacity-0 cursor-pointer"
+          className="sr-only"
         />
       </motion.div>
     </div>

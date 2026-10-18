@@ -11,14 +11,16 @@ interface ServerModalProps {
 }
 
 export function ServerModal({ isOpen, onClose, onServerChange }: ServerModalProps) {
-  const [url, setUrl] = useState("");
+  const [url, setUrl] = useState(() => getApiBaseUrl());
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   useEffect(() => {
     if (isOpen) {
-      setUrl(getApiBaseUrl());
-      setTestResult(null);
+      queueMicrotask(() => {
+        setUrl(getApiBaseUrl());
+        setTestResult(null);
+      });
     }
   }, [isOpen]);
 

@@ -21,6 +21,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from app.core.config import settings
 from app.core.logger import get_logger
 from app.core.generic_store import GenericJobStore
+from app.core.security import resolve_within_directory
 from app.models.gen_job import GenJob, GenJobCreateRequest, GenJobResponse, GenStatus
 from app.pipelines.video_generator import generate_video
 
@@ -94,7 +95,10 @@ async def create_gen_job(
     background_tasks: BackgroundTasks,
 ) -> GenJobResponse:
     """Create a new video generation job from image + prompt."""
-    image_path = Path(request.image_upload_id).resolve()
+    try:
+        image_path = resolve_within_directory(request.image_upload_id, settings.upload_dir)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid image path.") from exc
     if not image_path.exists():
         raise HTTPException(status_code=404, detail=f"Image not found: {image_path}")
     if not request.prompt.strip():

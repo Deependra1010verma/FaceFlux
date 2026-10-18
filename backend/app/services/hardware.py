@@ -1,6 +1,11 @@
 """
 Hardware detection service.
 Detects CPU, RAM, GPU, VRAM, and selects ONNX execution provider.
+
+Platform support:
+  - Linux:         NVIDIA CUDA, AMD ROCm, CPU
+  - macOS arm64:   Apple Silicon → CoreMLExecutionProvider (Neural Engine + GPU)
+  - Windows:       CUDA, CPU
 """
 
 import platform
@@ -29,6 +34,7 @@ class HardwareService:
         self._detected = True
 
     def _detect_cpu(self) -> None:
+        # Linux: read from /proc/cpuinfo
         try:
             with open("/proc/cpuinfo") as f:
                 for line in f:
@@ -36,7 +42,8 @@ class HardwareService:
                         self.cpu_name = line.split(":")[1].strip()
                         break
         except Exception:
-            self.cpu_name = platform.processor() or "Unknown"
+            # macOS / Windows fallback
+            self.cpu_name = platform.processor() or platform.machine() or "Unknown"
         self.cpu_cores = psutil.cpu_count(logical=True) or 0
 
     def _detect_ram(self) -> None:
@@ -44,7 +51,7 @@ class HardwareService:
         self.ram_gb = round(mem.total / (1024 ** 3), 1)
 
     def _detect_gpu(self) -> None:
-        # Try nvidia-smi
+        # ── NVIDIA (Linux / Windows) ──────────────────────────────────────────
         try:
             result = subprocess.run(
                 ["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
@@ -58,7 +65,7 @@ class HardwareService:
         except Exception:
             pass
 
-        # Try ROCm (AMD)
+        # ── AMD ROCm (Linux) ──────────────────────────────────────────────────
         try:
             result = subprocess.run(
                 ["rocm-smi", "--showproductname"],
@@ -69,6 +76,35 @@ class HardwareService:
                 return
         except Exception:
             pass
+
+        # ── Apple Silicon (macOS arm64) — Unified Memory ───────────────────────
+        # M-series chips have Neural Engine + GPU cores sharing the same memory pool.
+        # CoreMLExecutionProvider routes ONNX ops to ANE/GPU Metal shaders automatically.
+        if platform.system() == "Darwin" and platform.machine() == "arm64":
+            chip_name = "Apple Silicon"
+            try:
+                result = subprocess.run(
+                    ["system_profiler", "SPHardwareDataType"],
+                    capture_output=True, text=True, timeout=8,
+                )
+                if result.returncode == 0:
+                    for line in result.stdout.splitlines():
+                        stripped = line.strip()
+                        # Covers "Chip: Apple M5" and older "Processor Name: Apple M1"
+                        if stripped.startswith("Chip:") or stripped.startswith("Processor Name:"):
+                            chip_name = stripped.split(":", 1)[-1].strip()
+                            break
+            except Exception:
+                pass
+
+            self.gpu_name = chip_name          # e.g. "Apple M5"
+            self.vram_gb = self.ram_gb         # Unified memory — no separate VRAM pool
+            logger.info(
+                "apple_silicon_detected",
+                chip=chip_name,
+                unified_memory_gb=self.ram_gb,
+            )
+            return
 
         self.gpu_name = "None"
 
@@ -82,6 +118,10 @@ class HardwareService:
                 self.acceleration = "CUDAExecutionProvider"
             elif "ROCMExecutionProvider" in available:
                 self.acceleration = "ROCMExecutionProvider"
+            elif "CoreMLExecutionProvider" in available:
+                # Apple Silicon: delegates ops to Neural Engine & GPU via Metal
+                # First-run compiles+caches graph; subsequent runs load from cache instantly
+                self.acceleration = "CoreMLExecutionProvider"
             elif "OpenVINOExecutionProvider" in available:
                 self.acceleration = "OpenVINOExecutionProvider"
             else:
@@ -102,11 +142,15 @@ class HardwareService:
         }
 
     def get_onnx_providers(self) -> list:
+        """Return ordered list of ONNX execution providers for this machine."""
         providers = []
         if self.acceleration == "CUDAExecutionProvider":
             providers.append("CUDAExecutionProvider")
         elif self.acceleration == "ROCMExecutionProvider":
             providers.append("ROCMExecutionProvider")
+        elif self.acceleration == "CoreMLExecutionProvider":
+            providers.append("CoreMLExecutionProvider")
+        # Always append CPU as final fallback — handles unsupported ops gracefully
         providers.append("CPUExecutionProvider")
         return providers
 

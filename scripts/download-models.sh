@@ -61,13 +61,14 @@ download_file() {
 }
 
 # ── [1] InsightFace buffalo_l ──────────────────────────────────────────────────
-echo "[1/4] InsightFace buffalo_l (Face Detector)"
+echo "[1/6] InsightFace buffalo_l (Face Detector — quality mode)"
 echo "      Auto-downloaded by InsightFace on first run."
 echo "      Location: ~/.insightface/models/buffalo_l/"
 echo ""
 
+
 # ── [2] inswapper_128.onnx ────────────────────────────────────────────────────
-echo "[2/4] inswapper_128.onnx — Face Swap Engine (~529 MB)"
+echo "[2/6] inswapper_128.onnx — Face Swap Engine (~529 MB)"
 echo "      License: Non-commercial/research use only (InsightFace)"
 download_file \
   "https://github.com/deepinsight/insightface/releases/download/model-zoo/inswapper_128.onnx" \
@@ -79,7 +80,7 @@ echo ""
 # ── [3] GPEN-BFR-512.onnx ────────────────────────────────────────────────────
 # GPEN replaces CodeFormer — works on Python 3.14, pure ONNX, better quality
 # Source: FaceFusion model assets (harisreedhar/Face-Upscalers-ONNX)
-echo "[3/4] GPEN-BFR-512.onnx — Face Enhancer, primary (~330 MB)"
+echo "[3/6] GPEN-BFR-512.onnx — Face Enhancer, primary (~330 MB)"
 echo "      License: MIT (yangxy/GPEN)"
 echo "      Upgrades: 128px inswapper output → 512px sharp, detailed face"
 
@@ -102,7 +103,7 @@ echo ""
 
 # ── [4] GPEN-BFR-256.onnx ────────────────────────────────────────────────────
 # Smaller/faster alternative to 512 version — used as automatic fallback
-echo "[4/4] GPEN-BFR-256.onnx — Face Enhancer, fallback (~80 MB)"
+echo "[4/6] GPEN-BFR-256.onnx — Face Enhancer, fallback (~80 MB)"
 echo "      Auto-used if GPEN-512 unavailable or on low-VRAM GPU"
 
 GPEN_256_URL_PRIMARY="https://github.com/facefusion/facefusion-assets/releases/download/models-3.0.0/gpen_bfr_256.onnx"
@@ -120,6 +121,32 @@ if ! download_file \
     "GPEN-BFR-256.onnx (fallback)" \
     "10000000"
 fi
+echo ""
+
+# ── [5] bisenet_resnet_34.onnx ────────────────────────────────────────────────
+# Phase 2: BiSeNet face parser — semantic pixel mask for invisible blending.
+# Detects skin, nose, lips, eyes independently → GPEN gets only face region,
+# background & hair are untouched → zero halo artifacts.
+echo "[5/6] bisenet_resnet_34.onnx — BiSeNet Face Parser, primary (~50 MB)"
+echo "      Phase 2 upgrade: pixel-level semantic mask for invisible blending"
+echo "      License: MIT (FaceFusion model assets)"
+download_file \
+  "https://github.com/facefusion/facefusion-assets/releases/download/models-3.0.0/bisenet_resnet_34.onnx" \
+  "$MODEL_DIR/bisenet_resnet_34.onnx" \
+  "bisenet_resnet_34.onnx" \
+  "10000000"
+echo ""
+
+# ── [6] bisenet_resnet_18.onnx ────────────────────────────────────────────────
+# Smaller/faster BiSeNet — auto-used as fallback if resnet_34 is unavailable.
+echo "[6/6] bisenet_resnet_18.onnx — BiSeNet Face Parser, fallback (~25 MB)"
+echo "      Faster alternative if resnet_34 is slow on first run"
+echo "      License: MIT (FaceFusion model assets)"
+download_file \
+  "https://github.com/facefusion/facefusion-assets/releases/download/models-3.0.0/bisenet_resnet_18.onnx" \
+  "$MODEL_DIR/bisenet_resnet_18.onnx" \
+  "bisenet_resnet_18.onnx" \
+  "5000000"
 echo ""
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

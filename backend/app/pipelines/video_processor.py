@@ -9,10 +9,17 @@ Performance improvements:
   3. Scene change detection: agar frame static hai, enhancement skip karo
   4. Color correction per frame (Stage 1 from color_correction.py)
   5. GPEN-aware enhancement with face landmarks (Stage 1)
+
+Apple Silicon (M-series) specific:
+  6. CoreML ONNX provider → Neural Engine + GPU acceleration (auto via hardware_service)
+  7. VideoToolbox hardware encoding → h264_videotoolbox (auto via ffmpeg service)
+  8. Higher FRAME_BATCH_SIZE on M5 16GB unified memory (safe up to 64)
+  9. Increased worker count ceiling for M5's 10-core CPU
 """
 
 import asyncio
 import os
+import platform
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -33,14 +40,62 @@ from app.services.ffmpeg import probe_video, extract_audio, mux_audio_video
 
 logger = get_logger(__name__)
 
+
+def _is_apple_silicon() -> bool:
+    """True when running natively on Apple Silicon (arm64 macOS)."""
+    return platform.system() == "Darwin" and platform.machine() == "arm64"
+
+def _get_safe_workers(enhance: bool) -> int:
+    """
+    Calculate memory-safe worker count based on available system RAM.
+
+    Why this is critical:
+      INSwapper + GPEN-512 neural networks already multithread internally across CPU cores.
+      Spawning os.cpu_count() (e.g. 12–24) concurrent GPEN-512 instances consumes
+      ~800MB–1GB PER WORKER, causing a sudden 12GB+ RAM spike that crashes 16GB/18GB systems.
+      Capping to 2-4 workers keeps memory under control while saturating all CPU cores.
+
+    Apple Silicon M5 (16GB unified):
+      - CoreML handles neural math on ANE/GPU, reducing CPU thread pressure per worker.
+      - 16GB unified memory with fast 153 GB/s bandwidth = higher safe worker ceiling.
+      - M5 10-core CPU: 4 performance + 6 efficiency cores.
+    """
+    import psutil
+    try:
+        available_gb = psutil.virtual_memory().available / (1024 ** 3)
+    except Exception:
+        available_gb = 8.0
+
+    apple = _is_apple_silicon()
+
+    if enhance:
+        if available_gb < 4.0:
+            return 1
+        elif available_gb < 8.0:
+            return 2
+        elif apple:
+            # M5: CoreML offloads math → each worker uses less CPU → safe to push higher
+            return min(4, max(2, (os.cpu_count() or 4) // 3))
+        else:
+            return min(3, max(1, (os.cpu_count() or 2) // 3))
+    else:
+        if available_gb < 4.0:
+            return 2
+        elif apple:
+            return min(6, max(3, (os.cpu_count() or 4) // 2))
+        else:
+            return min(4, max(2, (os.cpu_count() or 2) // 2))
+
+
 QUALITY_SETTINGS = {
     "fast": {
         "crf": 23,
         "preset": "ultrafast",
         "enhance": False,
-        "det_sample_rate": 8,     # detect every N frames
-        "color_correction": False, # skip color correction for speed
-        "workers": max(2, os.cpu_count() or 2),
+        "det_sample_rate": 8,      # detect every N frames
+        "color_correction": False,  # skip color correction for speed
+        "vt_quality": "50",        # VideoToolbox quality (macOS)
+        "vt_bitrate": "4M",        # VideoToolbox bitrate cap
     },
     "balanced": {
         "crf": 18,
@@ -48,7 +103,8 @@ QUALITY_SETTINGS = {
         "enhance": True,
         "det_sample_rate": 3,
         "color_correction": True,
-        "workers": max(2, (os.cpu_count() or 2)),
+        "vt_quality": "60",        # VideoToolbox ≈ CRF 18
+        "vt_bitrate": "8M",
     },
     "high": {
         "crf": 15,
@@ -56,11 +112,13 @@ QUALITY_SETTINGS = {
         "enhance": True,
         "det_sample_rate": 1,
         "color_correction": True,
-        "workers": max(2, (os.cpu_count() or 2)),
+        "vt_quality": "70",        # VideoToolbox ≈ CRF 15 (near-lossless)
+        "vt_bitrate": "15M",
     },
 }
 
 ProgressCallback = Callable[[JobStatus, int, str], None]
+
 
 
 # ── IoU + face tracking helpers ───────────────────────────────────────────────
@@ -140,33 +198,87 @@ def _process_single_frame(
     result = frame.copy()
 
     try:
-        # Swap
-        result = face_swapper.swap(result, target_face, source_face)
+        # ── Step 1: Raw face swap (inswapper_128) ─────────────────────────────
+        swapped_full = face_swapper.swap(result, target_face, source_face)
 
-        # Color correction
-        if do_color and settings.color_correction:
-            bbox = None
-            if hasattr(target_face, "bbox") and target_face.bbox is not None:
-                bbox = target_face.bbox.tolist()
-            result = correct_face_color(
-                swapped_frame=result,
-                original_frame=original,
-                face_bbox=bbox,
-                strength=0.5,
-            )
+        # ── Step 2: BiSeNet semantic blending (Phase 2 quality upgrade) ───────
+        # Extract aligned face crop → run BiSeNet → get pixel-level mask →
+        # blend swapped face over original with soft semantic boundary.
+        # Falls back silently to direct paste if model not available.
+        from app.pipelines.face_parser import face_parser
 
-        # GPEN enhancement
+        if face_parser.is_available:
+            try:
+                # Get face crop from the ORIGINAL frame (pre-swap region)
+                bbox = None
+                if hasattr(target_face, "bbox") and target_face.bbox is not None:
+                    b = target_face.bbox
+                    h_fr, w_fr = original.shape[:2]
+                    x1 = max(0, int(b[0]))
+                    y1 = max(0, int(b[1]))
+                    x2 = min(w_fr, int(b[2]))
+                    y2 = min(h_fr, int(b[3]))
+                    bbox = (x1, y1, x2, y2)
+
+                if bbox and (bbox[2] - bbox[0]) > 10 and (bbox[3] - bbox[1]) > 10:
+                    orig_crop    = original[bbox[1]:bbox[3], bbox[0]:bbox[2]]
+                    swapped_crop = swapped_full[bbox[1]:bbox[3], bbox[0]:bbox[2]]
+
+                    # Color correct the swapped crop to match original lighting
+                    if do_color and settings.color_correction:
+                        swapped_crop = correct_face_color(
+                            swapped_frame=swapped_full,
+                            original_frame=original,
+                            face_bbox=list(b),
+                            strength=0.5,
+                        )[bbox[1]:bbox[3], bbox[0]:bbox[2]]
+
+                    # BiSeNet semantic blend — skin/face pixels only
+                    blended_crop = face_parser.blend_with_fallback(
+                        original=orig_crop,
+                        swapped=swapped_crop,
+                        face_crop=orig_crop,
+                    )
+
+                    # Paste blended crop back into full frame
+                    result = swapped_full.copy()
+                    result[bbox[1]:bbox[3], bbox[0]:bbox[2]] = blended_crop
+                else:
+                    result = swapped_full
+            except Exception as bisenet_err:
+                logger.debug("bisenet_frame_error", error=str(bisenet_err))
+                result = swapped_full
+        else:
+            # BiSeNet not available — use old path (still good quality)
+            result = swapped_full
+
+            # Color correction (old path)
+            if do_color and settings.color_correction:
+                bbox_list = None
+                if hasattr(target_face, "bbox") and target_face.bbox is not None:
+                    bbox_list = target_face.bbox.tolist()
+                result = correct_face_color(
+                    swapped_frame=result,
+                    original_frame=original,
+                    face_bbox=bbox_list,
+                    strength=0.5,
+                )
+
+        # ── Step 3: GPEN face enhancement ────────────────────────────────────
         if do_enhance:
             result = face_enhancer.enhance(
                 result,
                 face=target_face,
                 fidelity=fidelity,
             )
+
     except Exception as e:
         logger.warning("frame_process_error", error=str(e))
         return frame  # return original on error
 
     return result
+
+
 
 
 # ── Main pipeline ─────────────────────────────────────────────────────────────
@@ -179,9 +291,9 @@ async def process_video(job: Job, update_progress: ProgressCallback) -> str:
     """
     job_id = job.job_id
     q = QUALITY_SETTINGS.get(job.quality, QUALITY_SETTINGS["balanced"])
-    do_enhance = job.enhance and q["enhance"]
-    do_color = q["color_correction"]
-    num_workers = q["workers"]
+    do_enhance = job.enhance and q.get("enhance", True)
+    do_color = q.get("color_correction", True)
+    num_workers = q.get("workers") or _get_safe_workers(do_enhance)
 
     def _run_pipeline() -> str:
         logger.info(
@@ -192,7 +304,6 @@ async def process_video(job: Job, update_progress: ProgressCallback) -> str:
         )
 
         video_path = Path(job.video_path)
-        face_path = Path(job.face_path)
         job_temp_dir = settings.temp_dir / job_id
         job_temp_dir.mkdir(parents=True, exist_ok=True)
 
@@ -377,6 +488,11 @@ async def process_video(job: Job, update_progress: ProgressCallback) -> str:
                 frame_idx += 1
                 last_raw_frame = frame
 
+                # Periodic memory cleanup to prevent RAM accumulation
+                if frame_idx % 45 == 0:
+                    import gc
+                    gc.collect()
+
                 # Progress update every 30 frames
                 if frame_idx % 30 == 0 and total_frames > 0:
                     pct = int(12 + (frame_idx / total_frames) * 75)
@@ -415,7 +531,7 @@ async def process_video(job: Job, update_progress: ProgressCallback) -> str:
         update_progress(JobStatus.ENCODING, 90, "Encoding final video...")
         from datetime import datetime
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_path = settings.output_dir / f"faceswap_{timestamp}_{quality}_{job_id[:8]}.mp4"
+        output_path = settings.output_dir / f"faceswap_{timestamp}_{job.quality}_{job_id[:8]}.mp4"
 
         mux_audio_video(
             frames_video=raw_output,
@@ -425,6 +541,9 @@ async def process_video(job: Job, update_progress: ProgressCallback) -> str:
             crf=q["crf"],
             preset=q["preset"],
             codec=settings.output_codec,
+            vt_quality=q.get("vt_quality", "60"),      # VideoToolbox quality (macOS only)
+            vt_bitrate=q.get("vt_bitrate", "8M"),       # VideoToolbox bitrate cap (macOS only)
+            quality=job.quality,                         # TNR strength: fast=off, balanced=light, high=strong
         )
 
         logger.info("encoding_complete", job_id=job_id, output=str(output_path))

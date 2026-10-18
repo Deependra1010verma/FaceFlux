@@ -22,6 +22,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from app.core.config import settings
 from app.core.logger import get_logger
 from app.core.generic_store import GenericJobStore
+from app.core.security import resolve_within_directory
 from app.models.tryon_job import TryOnJob, TryOnJobCreateRequest, TryOnJobResponse, TryOnStatus
 from app.pipelines.outfit_transfer import transfer_outfit
 
@@ -99,8 +100,11 @@ async def create_tryon_job(
     background_tasks: BackgroundTasks,
 ) -> TryOnJobResponse:
     """Create virtual try-on job: video + clothing photo."""
-    video_path = Path(request.video_upload_id).resolve()
-    clothing_path = Path(request.clothing_upload_id).resolve()
+    try:
+        video_path = resolve_within_directory(request.video_upload_id, settings.upload_dir)
+        clothing_path = resolve_within_directory(request.clothing_upload_id, settings.upload_dir)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid upload path.") from exc
 
     if not video_path.exists():
         raise HTTPException(status_code=404, detail=f"Video not found: {video_path}")

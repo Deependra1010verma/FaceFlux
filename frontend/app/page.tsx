@@ -6,6 +6,7 @@ import {
   cancelJob,
   createJob,
   fetchSystemInfo,
+  getOutputUrl,
   setApiBaseUrl,
   streamJobProgress,
   uploadFace,
@@ -88,8 +89,14 @@ export default function HomePage() {
         window.history.replaceState({}, document.title, window.location.pathname);
       }
     }
-    loadSystemInfo();
-  }, [loadSystemInfo]);
+  }, []);
+
+  useEffect(() => {
+    fetchSystemInfo()
+      .then((info) => setSysInfo(info))
+      .catch((e: Error) => setBackendError(e.message))
+      .finally(() => setBackendLoading(false));
+  }, []);
 
   // ── Files ─────────────────────────────────────────────────────────────────
   const [videoFile, setVideoFile] = useState<File | null>(null);
@@ -146,14 +153,10 @@ export default function HomePage() {
   const sseCleanupRef = useRef<(() => void) | null>(null);
 
   // ── History ───────────────────────────────────────────────────────────────
-  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [history, setHistory] = useState<HistoryEntry[]>(() =>
+    typeof window === "undefined" ? [] : loadHistory()
+  );
   const [showHistory, setShowHistory] = useState(false);
-
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      setHistory(loadHistory());
-    }
-  }, []);
 
   const addToHistory = useCallback((jobId: string, isImage: boolean) => {
     const entry: HistoryEntry = { jobId, timestamp: Date.now(), isImage };
@@ -270,7 +273,11 @@ export default function HomePage() {
   }, [job]);
 
   const isProcessing = stage === "processing" || stage === "uploading";
-  const canStart = !!videoFile && faceFiles.length > 0 && stage === "idle" && !backendError;
+  const canStart =
+    !!videoFile &&
+    faceFiles.length > 0 &&
+    (stage === "idle" || stage === "error") &&
+    !backendError;
 
   // ── Keyboard shortcuts ─────────────────────────────────────────────────────
   // Placed after all handlers so they are defined when the effect runs.
@@ -398,7 +405,7 @@ export default function HomePage() {
                   <motion.a
                     key={entry.jobId}
                     whileHover={{ scale: 1.05 }}
-                    href={`/api/jobs/${entry.jobId}/output`}
+                    href={getOutputUrl(entry.jobId)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="flex-shrink-0 w-16 h-16 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-[10px] text-slate-500 hover:border-violet-500 transition-colors overflow-hidden"

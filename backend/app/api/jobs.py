@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from app.core import job_store
 from app.core.config import settings
 from app.core.logger import get_logger
+from app.core.security import resolve_within_directory
 from app.models.job import (
     FaceInfo,
     Job,
@@ -23,10 +24,6 @@ from app.models.job import (
     JobStatus,
     VideoMeta,
 )
-from app.pipelines.face_detector import face_detector
-from app.pipelines.video_processor import process_video
-from app.pipelines.image_processor import process_image
-from app.services.ffmpeg import probe_video
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -49,6 +46,16 @@ class JobDetailResponse(BaseModel):
     created_at: float
     started_at: Optional[float] = None
     completed_at: Optional[float] = None
+
+
+def _resolve_uploaded_file(path: str, label: str) -> Path:
+    try:
+        uploaded_path = resolve_within_directory(path, settings.upload_dir)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid {label} path.") from exc
+    if not uploaded_path.exists():
+        raise HTTPException(status_code=404, detail=f"{label} file not found: {uploaded_path}")
+    return uploaded_path
 
 
 def _job_to_detail(job: Job) -> JobDetailResponse:
@@ -84,8 +91,10 @@ async def _run_job(job: Job) -> None:
             # Run pipeline (Image-to-Image vs Video)
             is_image = Path(job.video_path).suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}
             if is_image:
+                from app.pipelines.image_processor import process_image
                 output_path = await process_image(job, _progress)
             else:
+                from app.pipelines.video_processor import process_video
                 output_path = await process_video(job, _progress)
 
             job_store.update_job(
@@ -148,9 +157,7 @@ async def create_job(
     Create a new face-swap job.
     Expects absolute paths from previous /upload calls.
     """
-    video_path = Path(request.video_upload_id)
-    if not video_path.exists():
-        raise HTTPException(status_code=404, detail=f"Video file not found: {video_path}")
+    video_path = _resolve_uploaded_file(request.video_upload_id, "Video")
 
     # Collect all face paths (multi-angle support)
     raw_face_ids = []
@@ -164,9 +171,7 @@ async def create_job(
 
     valid_face_paths: list[str] = []
     for fid in raw_face_ids:
-        p = Path(fid)
-        if not p.exists():
-            raise HTTPException(status_code=404, detail=f"Face image not found: {p}")
+        p = _resolve_uploaded_file(fid, "Face image")
         valid_face_paths.append(str(p))
 
     primary_face_path = valid_face_paths[0]
@@ -178,6 +183,8 @@ async def create_job(
     face_infos = []
 
     if is_target_image:
+        from app.pipelines.face_detector import face_detector
+
         # Static Photo target
         try:
             import cv2
@@ -188,6 +195,9 @@ async def create_job(
         except Exception as e:
             logger.warning("target_image_face_detect_warning", error=str(e))
     else:
+        from app.pipelines.face_detector import face_detector
+        from app.services.ffmpeg import probe_video
+
         # Video target — probe & sample representative frame
         try:
             meta = probe_video(video_path)

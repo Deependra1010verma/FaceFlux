@@ -97,15 +97,18 @@ class FaceSwapper:
         import copy
         # Score-weighted average: low-confidence photos (blurry/angled) get less weight
         weights_arr = np.array(weights, dtype=np.float32)
-        weights_arr = weights_arr / weights_arr.sum()  # normalize to sum=1
+        weight_sum = float(weights_arr.sum())
+        if weight_sum <= 0:
+            weights_arr = np.ones(len(embeddings), dtype=np.float32) / len(embeddings)
+        else:
+            weights_arr = weights_arr / weight_sum
+
         mean_emb = np.average(np.stack(embeddings), axis=0, weights=weights_arr)
         norm = np.linalg.norm(mean_emb)
-        normed_emb = mean_emb / norm if norm > 0 else mean_emb
+        fused_emb = mean_emb / norm if norm > 0 else mean_emb
 
         fused_face = copy.copy(source_faces[0])
-        fused_face.embedding = normed_emb
-        if hasattr(fused_face, "normed_embedding"):
-            fused_face.normed_embedding = normed_emb
+        fused_face.embedding = fused_emb
 
         logger.info("source_faces_fused", count=len(embeddings),
                     weights=[round(w, 3) for w in weights_arr.tolist()])

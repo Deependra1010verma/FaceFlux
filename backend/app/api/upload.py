@@ -25,6 +25,7 @@ ALLOWED_TARGET_EXTS = ALLOWED_VIDEO_EXTS | ALLOWED_IMAGE_EXTS
 
 
 async def _save_upload(file: UploadFile, directory, allowed_exts: set, max_bytes: int) -> tuple[str, int]:
+    directory.mkdir(parents=True, exist_ok=True)
     filename = file.filename or "upload"
     ext = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 

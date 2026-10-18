@@ -5,6 +5,9 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 const nextConfig: NextConfig = {
   // Required for Vercel deployment
   output: process.env.VERCEL ? undefined : undefined,
+  turbopack: {
+    root: process.cwd(),
+  },
 
   async rewrites() {
     // In production (Vercel), we call backend directly from client using NEXT_PUBLIC_API_URL.

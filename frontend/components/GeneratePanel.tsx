@@ -100,7 +100,7 @@ export function GeneratePanel() {
       setError(e instanceof Error ? e.message : String(e));
       setStage("error");
     }
-  }, [imageFile, prompt, duration]);
+  }, [imageFile, prompt, duration, providerMode]);
 
   const handleCancel = useCallback(async () => {
     sseCleanupRef.current?.();
@@ -455,4 +455,3 @@ export function GeneratePanel() {
     </motion.div>
   );
 }
-
