@@ -31,6 +31,7 @@ import numpy as np
 
 from app.core.config import settings
 from app.core.logger import get_logger
+from app.services.apple_accel import apple_accel
 
 logger = get_logger(__name__)
 
@@ -103,25 +104,42 @@ class FaceParserONNX:
             import onnxruntime as ort
             from app.services.hardware import hardware_service
 
+            is_apple = platform.system() == "Darwin" and platform.machine() == "arm64"
             providers = hardware_service.get_onnx_providers()
 
-            # CoreML cache for faster restarts on Apple Silicon
-            if (platform.system() == "Darwin" and platform.machine() == "arm64"
-                    and "CoreMLExecutionProvider" in providers):
-                cache_dir = ".coreml_cache"
+            if is_apple and "CoreMLExecutionProvider" in providers:
+                # CoreML cache: compiled Metal graph survives restarts.
+                # Pass via provider_options (parallel list to providers) —
+                # index 0 options → index 0 provider (CoreML).
+                cache_dir = str(Path(".coreml_cache") / "bisenet")
                 Path(cache_dir).mkdir(parents=True, exist_ok=True)
-                session_options = ort.SessionOptions()
+                provider_options = [
+                    {
+                        "ModelCacheDirectory": cache_dir,
+                        # MLComputeUnits NOT set → CoreML default = ALL
+                        # (ANE + GPU + CPU). Apple enum: 0=cpuOnly, 1=cpuAndGPU,
+                        # 2=all, 3=cpuAndNeuralEngine — omitting = safest "all".
+                    },
+                    {},  # no options for CPU fallback
+                ]
                 session = ort.InferenceSession(
                     str(model_path),
-                    sess_options=session_options,
                     providers=providers,
+                    provider_options=provider_options,
+                )
+                logger.info(
+                    "bisenet_loaded",
+                    model=model_path.name,
+                    provider="CoreMLExecutionProvider",
+                    cache_dir=cache_dir,
                 )
             else:
                 session = ort.InferenceSession(str(model_path), providers=providers)
+                logger.info("bisenet_loaded", model=model_path.name, provider=providers[0])
 
+            # Common path: store session regardless of which branch created it
             self._session    = session
             self._input_name = session.get_inputs()[0].name
-            logger.info("bisenet_loaded", model=model_path.name, provider=providers[0])
             return True
 
         except Exception as e:
@@ -145,7 +163,7 @@ class FaceParserONNX:
         h, w = face_crop.shape[:2]
 
         # Preprocess: resize → RGB → normalize to [-1, 1] → BCHW
-        inp = cv2.resize(face_crop, (512, 512))
+        inp = apple_accel.gpu_resize(face_crop, (512, 512))
         inp = cv2.cvtColor(inp, cv2.COLOR_BGR2RGB).astype(np.float32)
         inp = (inp / 127.5) - 1.0
         inp = inp.transpose(2, 0, 1)[np.newaxis]          # (1, 3, 512, 512)
@@ -195,10 +213,10 @@ class FaceParserONNX:
             )
             mask = cv2.erode(mask, kernel)
 
-        # Gaussian blur: feather/soften mask edges for invisible blending
+        # Gaussian blur: feather/soften mask edges for invisible blending (Metal GPU)
         if blur_ksize > 0:
             ksize = blur_ksize if blur_ksize % 2 == 1 else blur_ksize + 1
-            mask = cv2.GaussianBlur(mask, (ksize, ksize), 0)
+            mask = apple_accel.gpu_gaussian_blur(mask, (ksize, ksize), 0)
 
         return mask.astype(np.float32) / 255.0
 

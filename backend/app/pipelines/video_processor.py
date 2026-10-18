@@ -37,6 +37,7 @@ from app.pipelines.face_swapper import face_swapper
 from app.pipelines.face_enhancer import face_enhancer
 from app.pipelines.color_correction import correct_face_color
 from app.services.ffmpeg import probe_video, extract_audio, mux_audio_video
+from app.services.apple_accel import apple_accel
 
 logger = get_logger(__name__)
 
@@ -385,6 +386,7 @@ async def process_video(job: Job, update_progress: ProgressCallback) -> str:
         # Batch buffer for parallel processing
         BATCH_SIZE = max(4, num_workers * 2)
         frame_buffer: List[Tuple[int, np.ndarray, object]] = []  # (idx, frame, face)
+        batch_counter = 0
 
         def flush_batch(batch: List[Tuple[int, np.ndarray, object]]):
             """Process a batch of (idx, frame, face) tuples in parallel."""
@@ -484,6 +486,8 @@ async def process_video(job: Job, update_progress: ProgressCallback) -> str:
                         prev_output_frame = out_frame
                         writer.write(out_frame)
                     frame_buffer.clear()
+                    batch_counter += 1
+                    apple_accel.thermal_pause(batch_counter, every=6, pause_ms=80)
 
                 frame_idx += 1
                 last_raw_frame = frame

@@ -12,6 +12,10 @@ opencv-python-headless>=4.8.0
 numpy>=1.26.0
 Pillow>=10.0.0
 
+# onnxruntime: platform-specific
+# macOS arm64 → onnxruntime-silicon (CoreML + Metal support, arm64 native wheel)
+# Linux/Win   → onnxruntime (standard; swap for onnxruntime-gpu if CUDA available)
+# Install script handles the right one automatically — see scripts/start-mac.sh
 onnxruntime>=1.16.0
 
 # InsightFace — face detection & swapping (main engine)

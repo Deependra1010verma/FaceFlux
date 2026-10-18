@@ -73,28 +73,56 @@ class FaceSwapper:
         self._ensure_model()
         try:
             import insightface
+            import onnxruntime as ort
             model_path = self._model_path()
 
             if _is_apple_silicon():
-                # ── Apple Silicon: CoreML with compiled model cache ─────────────
-                # InsightFace's get_model() accepts provider_options as a list
-                # parallel to providers — index 0 options → index 0 provider.
-                # CoreML compiles inswapper_128 to Metal on first run (~3-4 min)
-                # then caches the blob so subsequent restarts are instant.
+                # ── Apple Silicon: build ort session directly with CoreML cache ──
+                # InsightFace's get_model() may ignore provider_options kwarg
+                # depending on version. To guarantee CoreML compiled-model caching,
+                # we pre-create the ort.InferenceSession ourselves with full
+                # provider_options, then pass the ready session via the
+                # 'session' kwarg — InsightFace accepts this and skips its own
+                # session creation.
                 Path(_COREML_CACHE_DIR).mkdir(parents=True, exist_ok=True)
                 providers = ["CoreMLExecutionProvider", "CPUExecutionProvider"]
                 provider_options = [
                     {
                         "ModelCacheDirectory": _COREML_CACHE_DIR,
-                        "MLComputeUnits": "0",  # 0 = ALL (ANE + GPU + CPU)
+                        # MLComputeUnits NOT set → CoreML default = ALL
+                        # (ANE + GPU + CPU). Apple enum: 0=cpuOnly, 1=cpuAndGPU,
+                        # 2=all, 3=cpuAndNeuralEngine — omitting = safest "all".
                     },
                     {},  # no options for CPU fallback
                 ]
-                self._swapper = insightface.model_zoo.get_model(
-                    str(model_path),
-                    providers=providers,
-                    provider_options=provider_options,
-                )
+                sess_options = ort.SessionOptions()
+                sess_options.enable_mem_pattern = True
+
+                try:
+                    ort_session = ort.InferenceSession(
+                        str(model_path),
+                        sess_options=sess_options,
+                        providers=providers,
+                        provider_options=provider_options,
+                    )
+                    # Try to pass pre-built session (InsightFace >= 0.7.3 supports this)
+                    self._swapper = insightface.model_zoo.get_model(
+                        str(model_path),
+                        session=ort_session,
+                    )
+                except TypeError:
+                    # Older InsightFace: 'session' kwarg not supported — fall back
+                    # to standard get_model() with providers (cache won't persist
+                    # but CoreML still accelerates inference)
+                    logger.warning(
+                        "swapper_session_kwarg_unsupported",
+                        note="Upgrade insightface>=0.7.3 for CoreML cache support",
+                    )
+                    self._swapper = insightface.model_zoo.get_model(
+                        str(model_path),
+                        providers=providers,
+                    )
+
                 logger.info(
                     "face_swapper_loaded",
                     provider="CoreMLExecutionProvider",

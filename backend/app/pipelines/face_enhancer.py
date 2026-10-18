@@ -30,6 +30,7 @@ from typing import Optional, Tuple
 
 from app.core.config import settings
 from app.core.logger import get_logger
+from app.services.apple_accel import apple_accel
 
 logger = get_logger(__name__)
 
@@ -181,9 +182,10 @@ class FaceEnhancer:
                             "CoreMLExecutionProvider",
                             {
                                 "ModelCacheDirectory": _COREML_CACHE_DIR,
-                                # MLComputeUnits 0 = ALL (ANE + GPU + CPU)
-                                # ANE is fastest for GPEN's conv layers on M-series.
-                                "MLComputeUnits": "0",
+                                # MLComputeUnits NOT set → CoreML default = ALL
+                                # (ANE + GPU + CPU). Apple enum: 0=cpuOnly,
+                                # 1=cpuAndGPU, 2=all, 3=cpuAndNeuralEngine.
+                                # Omitting is the safest way to get full ANE access.
                             },
                         ),
                         "CPUExecutionProvider",
@@ -252,9 +254,13 @@ class FaceEnhancer:
         """
         Warp & crop face region using 5-point landmarks.
         Returns (cropped_face, affine_matrix).
+        Uses Metal GPU on Apple Silicon via apple_accel.gpu_warp_affine.
         """
         matrix = self._get_affine_matrix(landmarks_5pt, output_size)
-        cropped = cv2.warpAffine(frame, matrix, (output_size, output_size))
+        # Metal-accelerated warpAffine (falls back to cv2 on Linux)
+        cropped = apple_accel.gpu_warp_affine(
+            frame, matrix, (output_size, output_size)
+        )
         return cropped, matrix
 
     def _paste_back(
@@ -267,16 +273,17 @@ class FaceEnhancer:
         """
         Paste the enhanced face back into the original frame using inverse warp.
         Uses feathered mask blending for smooth, natural edges.
+        warpAffine + GaussianBlur run on Metal GPU on Apple Silicon.
         """
         size = enhanced_face.shape[0]
         h, w = frame.shape[:2]
 
-        # Inverse warp: enhanced_face → frame coordinates
+        # Inverse warp: enhanced_face → frame coordinates (Metal GPU)
         inv_matrix = cv2.invertAffineTransform(matrix)
-        restored = cv2.warpAffine(
+        restored = apple_accel.gpu_warp_affine(
             enhanced_face, inv_matrix, (w, h),
             flags=cv2.INTER_LINEAR,
-            borderMode=cv2.BORDER_REFLECT,
+            border_mode=cv2.BORDER_REFLECT,
         )
 
         # Build soft feathered mask in warped space
@@ -287,12 +294,12 @@ class FaceEnhancer:
         face_mask[:, :border] = 0
         face_mask[:, -border:] = 0
 
-        # Gaussian blur for feathering
+        # Gaussian blur for feathering (Metal GPU)
         kernel = mask_blur * 2 + 1
-        face_mask = cv2.GaussianBlur(face_mask, (kernel, kernel), 0)
+        face_mask = apple_accel.gpu_gaussian_blur(face_mask, (kernel, kernel), 0)
 
-        # Warp mask back to frame space
-        mask_restored = cv2.warpAffine(
+        # Warp mask back to frame space (Metal GPU)
+        mask_restored = apple_accel.gpu_warp_affine(
             face_mask, inv_matrix, (w, h),
             flags=cv2.INTER_LINEAR,
         )

@@ -18,6 +18,7 @@ from app.core.config import settings
 from app.core.logger import get_logger
 from app.core.directories import ensure_directories
 from app.services.hardware import hardware_service
+from app.services.apple_accel import apple_accel
 from app.api import health, upload, jobs, system, generate, tryon
 
 logger = get_logger(__name__)
@@ -90,6 +91,19 @@ async def _preload_models() -> None:
             logger.info("model_preloaded", model="face_enhancer_gpen")
     except Exception as e:
         logger.warning("model_preload_failed", model="face_enhancer", error=str(e))
+
+    # BiSeNet face parser — optional (graceful fallback if model not downloaded yet)
+    try:
+        from app.pipelines.face_parser import face_parser
+        if face_parser.is_available:
+            logger.info("model_preloaded", model="bisenet_face_parser")
+        else:
+            logger.info(
+                "bisenet_not_preloaded",
+                hint="Run 'bash scripts/download-models.sh' to enable Phase 2 quality",
+            )
+    except Exception as e:
+        logger.warning("model_preload_failed", model="bisenet", error=str(e))
 
 
 # ── Cleanup background task ────────────────────────────────────────────────────
@@ -169,6 +183,10 @@ async def lifespan(application: FastAPI):
     ensure_directories()
     hardware_service.detect()
     logger.info("hardware_detected", info=hardware_service.summary())
+
+    # Enable OpenCV Metal/OpenCL GPU acceleration on Apple Silicon
+    # (gpu_warp_affine, gpu_gaussian_blur etc. in face_enhancer + face_parser)
+    apple_accel.setup()
 
     # Recover any jobs stuck in processing state from previous run
     _recover_stuck_jobs()
