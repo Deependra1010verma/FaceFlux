@@ -86,6 +86,10 @@ class Settings:
     default_quality:     str = _str("DEFAULT_QUALITY",     "balanced")
     max_concurrent_jobs: int = _int("MAX_CONCURRENT_JOBS", 1)
     frame_batch_size:    int = _int("FRAME_BATCH_SIZE",    32)
+    max_frame_workers:   int = _int("MAX_FRAME_WORKERS",   2)
+    det_sample_rate:     int = _int("DET_SAMPLE_RATE",     0)
+    enhance_frame_stride: int = _int("ENHANCE_FRAME_STRIDE", 1)
+    temporal_nr:          bool = os.environ.get("TEMPORAL_NR", "true").lower() != "false"
 
     # Output video
     output_codec:  str = _str("OUTPUT_CODEC",  "libx264")

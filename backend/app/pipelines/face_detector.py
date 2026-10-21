@@ -73,6 +73,8 @@ def _get_providers_with_cache() -> tuple[list, dict]:
         if p == "CoreMLExecutionProvider" and _is_apple_silicon():
             provider_options.append({
                 "ModelCacheDirectory": _COREML_CACHE_DIR,
+                    "ModelFormat": "MLProgram",
+                    "MLComputeUnits": "ALL",
                 "SpecializationStrategy": "FastPrediction",
             })
         else:
@@ -108,6 +110,7 @@ class FaceDetector:
                 name="buffalo_l",
                 root=str(settings.model_dir),
                 providers=providers,
+                provider_options=provider_options,
             )
             self._app_quality.prepare(
                 ctx_id=0 if "CUDA" in hardware_service.acceleration else -1,
@@ -137,6 +140,7 @@ class FaceDetector:
                 name="buffalo_sc",
                 root=str(settings.model_dir),
                 providers=providers,
+                provider_options=provider_options,
             )
             self._app_speed.prepare(
                 ctx_id=0 if "CUDA" in hardware_service.acceleration else -1,

@@ -13,13 +13,14 @@ Performance improvements:
 Apple Silicon (M-series) specific:
   6. CoreML ONNX provider → Neural Engine + GPU acceleration (auto via hardware_service)
   7. VideoToolbox hardware encoding → h264_videotoolbox (auto via ffmpeg service)
-  8. Higher FRAME_BATCH_SIZE on M5 16GB unified memory (safe up to 64)
-  9. Increased worker count ceiling for M5's 10-core CPU
+  8. Configurable small frame batches for 16GB unified memory
+  9. Conservative worker ceiling for M5's fanless thermal envelope
 """
 
 import asyncio
 import os
 import platform
+import copy
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -36,7 +37,7 @@ from app.pipelines.face_detector import face_detector
 from app.pipelines.face_swapper import face_swapper
 from app.pipelines.face_enhancer import face_enhancer
 from app.pipelines.color_correction import correct_face_color
-from app.services.ffmpeg import probe_video, extract_audio, mux_audio_video
+from app.services.ffmpeg import probe_video, extract_audio, RawVideoEncoder
 from app.services.apple_accel import apple_accel
 
 logger = get_logger(__name__)
@@ -69,23 +70,26 @@ def _get_safe_workers(enhance: bool) -> int:
 
     apple = _is_apple_silicon()
 
+    configured_limit = max(1, settings.max_frame_workers)
+
     if enhance:
         if available_gb < 4.0:
             return 1
         elif available_gb < 8.0:
-            return 2
+            return min(2, configured_limit)
         elif apple:
-            # M5: CoreML offloads math → each worker uses less CPU → safe to push higher
-            return min(4, max(2, (os.cpu_count() or 4) // 3))
+            # GPEN + INSwapper are large models. Keep concurrency conservative on
+            # 16GB unified memory; CoreML acceleration does not make model copies free.
+            return min(2, configured_limit)
         else:
-            return min(3, max(1, (os.cpu_count() or 2) // 3))
+            return min(2, configured_limit)
     else:
         if available_gb < 4.0:
             return 2
         elif apple:
-            return min(6, max(3, (os.cpu_count() or 4) // 2))
+            return min(3, max(1, configured_limit + 1))
         else:
-            return min(4, max(2, (os.cpu_count() or 2) // 2))
+            return min(3, max(1, configured_limit + 1))
 
 
 QUALITY_SETTINGS = {
@@ -167,6 +171,44 @@ def _extrapolate_bbox(
     return predicted.tolist()
 
 
+def _predict_face_geometry(face, old_bbox, new_bbox):
+    """Copy a detected face while moving/scaling its geometry to a predicted box.
+
+    InsightFace's swapper and GPEN both consume landmarks, not just the bbox.
+    Reusing the original Face object between detector samples causes alignment
+    drift, so every extrapolated frame gets transformed landmarks as well.
+    """
+    if face is None or old_bbox is None or new_bbox is None:
+        return face
+
+    predicted = copy.copy(face)
+    old = np.asarray(old_bbox, dtype=np.float32)
+    new = np.asarray(new_bbox, dtype=np.float32)
+    old_w = max(float(old[2] - old[0]), 1.0)
+    old_h = max(float(old[3] - old[1]), 1.0)
+    sx = float(new[2] - new[0]) / old_w
+    sy = float(new[3] - new[1]) / old_h
+
+    def transform_points(points):
+        if points is None:
+            return None
+        arr = np.asarray(points).copy()
+        if arr.ndim < 2 or arr.shape[-1] < 2:
+            return points
+        arr[..., 0] = new[0] + (arr[..., 0] - old[0]) * sx
+        arr[..., 1] = new[1] + (arr[..., 1] - old[1]) * sy
+        return arr
+
+    if hasattr(predicted, "bbox"):
+        predicted.bbox = new.copy()
+    for attr in ("kps", "landmark_2d_106"):
+        if hasattr(predicted, attr):
+            value = getattr(predicted, attr)
+            if value is not None:
+                setattr(predicted, attr, transform_points(value))
+    return predicted
+
+
 def _scene_changed(frame_a: np.ndarray, frame_b: np.ndarray, threshold: float = 8.0) -> bool:
     """
     Quick scene change detection using mean absolute difference of grayscale.
@@ -178,6 +220,32 @@ def _scene_changed(frame_a: np.ndarray, frame_b: np.ndarray, threshold: float = 
     gray_b = cv2.cvtColor(frame_b, cv2.COLOR_BGR2GRAY)
     diff = cv2.absdiff(gray_a, gray_b)
     return float(diff.mean()) > threshold
+
+
+def _blend_face_temporally(
+    current: np.ndarray,
+    previous: Optional[np.ndarray],
+    face,
+    current_weight: float = 0.85,
+) -> np.ndarray:
+    """Reduce face flicker without ghosting the moving background."""
+    if previous is None or face is None or not hasattr(face, "bbox"):
+        return current
+
+    h, w = current.shape[:2]
+    x1, y1, x2, y2 = [int(v) for v in face.bbox]
+    x1, y1 = max(0, x1), max(0, y1)
+    x2, y2 = min(w, x2), min(h, y2)
+    if x2 - x1 < 8 or y2 - y1 < 8:
+        return current
+
+    mask = np.zeros((h, w), dtype=np.float32)
+    center = ((x1 + x2) // 2, (y1 + y2) // 2)
+    axes = (max(2, (x2 - x1) // 2), max(2, (y2 - y1) // 2))
+    cv2.ellipse(mask, center, axes, 0, 0, 360, 1.0, -1)
+    mask = cv2.GaussianBlur(mask, (0, 0), sigmaX=max(2.0, min(12.0, (x2 - x1) / 10.0)))
+    mask = (mask * (1.0 - current_weight))[:, :, None]
+    return (current.astype(np.float32) * (1.0 - mask) + previous.astype(np.float32) * mask).astype(np.uint8)
 
 
 # ── Per-frame processor (runs in thread pool) ─────────────────────────────────
@@ -349,7 +417,7 @@ async def process_video(job: Job, update_progress: ProgressCallback) -> str:
         else:
             source_face = detected_source_faces[0]
 
-        # ── Step 4: Read all frames into memory (with progressive write) ──────
+        # ── Step 4: Stream frames through a bounded processing buffer ─────────
         update_progress(JobStatus.TRACKING, 10, "Opening video...")
         cap = cv2.VideoCapture(str(video_path))
         if not cap.isOpened():
@@ -363,9 +431,10 @@ async def process_video(job: Job, update_progress: ProgressCallback) -> str:
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-        raw_output = job_temp_dir / "raw_swapped.mp4"
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        writer = cv2.VideoWriter(str(raw_output), fourcc, fps, (width, height))
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_path = settings.output_dir / f"faceswap_{timestamp}_{job.quality}_{job_id[:8]}.mp4"
+        writer = None
 
         # Seed reference bbox from job's detected faces
         reference_bbox = None
@@ -373,7 +442,13 @@ async def process_video(job: Job, update_progress: ProgressCallback) -> str:
             fi = job.detected_faces[job.target_face_index]
             reference_bbox = fi.bbox
 
-        sample_rate = max(1, q["det_sample_rate"])
+        sample_rate = max(
+            1,
+            settings.det_sample_rate if settings.det_sample_rate > 0 else q["det_sample_rate"],
+        )
+        enhance_stride = max(1, settings.enhance_frame_stride)
+        if job.quality == "high":
+            enhance_stride = 1
         fidelity = settings.enhancer_fidelity
 
         frame_idx = 0
@@ -384,9 +459,24 @@ async def process_video(job: Job, update_progress: ProgressCallback) -> str:
         bbox_history: List[list] = []  # for bbox extrapolation
 
         # Batch buffer for parallel processing
-        BATCH_SIZE = max(4, num_workers * 2)
+        BATCH_SIZE = max(1, settings.frame_batch_size)
         frame_buffer: List[Tuple[int, np.ndarray, object]] = []  # (idx, frame, face)
         batch_counter = 0
+        pool = ThreadPoolExecutor(max_workers=num_workers)
+
+        writer = RawVideoEncoder(
+            output_path=output_path,
+            width=width,
+            height=height,
+            fps=fps,
+            audio_path=audio_path if has_audio else None,
+            crf=q["crf"],
+            preset=q["preset"],
+            codec=settings.output_codec,
+            vt_quality=q.get("vt_quality", "60"),
+            vt_bitrate=q.get("vt_bitrate", "8M"),
+            quality=job.quality if settings.temporal_nr else "fast",
+        )
 
         def flush_batch(batch: List[Tuple[int, np.ndarray, object]]):
             """Process a batch of (idx, frame, face) tuples in parallel."""
@@ -395,25 +485,47 @@ async def process_video(job: Job, update_progress: ProgressCallback) -> str:
             if not batch:
                 return []
 
-            with ThreadPoolExecutor(max_workers=num_workers) as pool:
-                futures = [
-                    pool.submit(
-                        _process_single_frame,
-                        frm, face, source_face, do_enhance, do_color, fidelity
-                    )
-                    for (_, frm, face) in batch
-                ]
-                results = []
-                for i, (fut, (bidx, frm, face)) in enumerate(zip(futures, batch)):
-                    try:
-                        out = fut.result(timeout=60)
-                        swapped_count += 1
-                    except Exception as e:
-                        logger.warning("batch_frame_failed", frame=bidx, error=str(e))
-                        out = frm  # fallback to original
+            futures = [
+                pool.submit(
+                    _process_single_frame,
+                    frm,
+                    face,
+                    source_face,
+                    do_enhance and (bidx % enhance_stride == 0),
+                    do_color,
+                    fidelity,
+                )
+                for (bidx, frm, face) in batch
+            ]
+            results = []
+            for fut, (bidx, frm, face) in zip(futures, batch):
+                try:
+                    out = fut.result(timeout=60)
+                    swapped_count += 1
+                except Exception as e:
+                    logger.warning("batch_frame_failed", frame=bidx, error=str(e))
+                    out = frm  # fallback to original
 
-                    results.append(out)
+                results.append(out)
             return results
+
+        def write_batch(batch: List[Tuple[int, np.ndarray, object]]) -> None:
+            """Flush processed frames in input order and apply face-only smoothing."""
+            nonlocal prev_output_frame, batch_counter
+            if not batch:
+                return
+
+            processed = flush_batch(batch)
+            for out_frame, (_, _, face) in zip(processed, batch):
+                if prev_output_frame is not None:
+                    out_frame = _blend_face_temporally(
+                        out_frame, prev_output_frame, face
+                    )
+                prev_output_frame = out_frame
+                writer.write(out_frame)
+            batch.clear()
+            batch_counter += 1
+            apple_accel.thermal_pause(batch_counter, every=6, pause_ms=80)
 
         update_progress(JobStatus.SWAPPING, 12, "Processing frames...")
 
@@ -430,8 +542,11 @@ async def process_video(job: Job, update_progress: ProgressCallback) -> str:
 
                 # ── Scene change detection ────────────────────────────────────
                 if last_raw_frame is not None and _scene_changed(last_raw_frame, frame):
+                    # Preserve frame order before resetting tracking state.
+                    write_batch(frame_buffer)
                     bbox_history.clear()
                     last_target_face = None
+                    reference_bbox = None
                     prev_output_frame = None
 
                 # ── Face detection with caching ───────────────────────────────
@@ -459,35 +574,29 @@ async def process_video(job: Job, update_progress: ProgressCallback) -> str:
                 else:
                     # Between detection frames: extrapolate bbox for tracking
                     if last_target_face is not None and len(bbox_history) >= 2:
+                        old_bbox = list(last_target_face.bbox)
                         predicted = _extrapolate_bbox(bbox_history)
                         if predicted:
                             reference_bbox = predicted
+                            last_target_face = _predict_face_geometry(
+                                last_target_face, old_bbox, predicted
+                            )
+                            bbox_history.append(predicted)
+                            if len(bbox_history) > 10:
+                                bbox_history.pop(0)
 
                 # Queue frame for batch processing (only if we have a face)
                 if last_target_face is not None:
                     frame_buffer.append((frame_idx, frame.copy(), last_target_face))
                 else:
                     # Write unprocessed frame directly — reset temporal state
+                    write_batch(frame_buffer)
                     prev_output_frame = None
                     writer.write(frame)
 
                 # Flush batch when buffer is full
                 if len(frame_buffer) >= BATCH_SIZE:
-                    processed = flush_batch(frame_buffer)
-                    for out_frame in processed:
-                        # ── Temporal consistency: blend with previous output frame ──
-                        # Reduces flicker caused by per-frame GPEN enhancement variance
-                        if prev_output_frame is not None:
-                            out_frame = cv2.addWeighted(
-                                out_frame, 0.85,
-                                prev_output_frame, 0.15,
-                                0,
-                            )
-                        prev_output_frame = out_frame
-                        writer.write(out_frame)
-                    frame_buffer.clear()
-                    batch_counter += 1
-                    apple_accel.thermal_pause(batch_counter, every=6, pause_ms=80)
+                    write_batch(frame_buffer)
 
                 frame_idx += 1
                 last_raw_frame = frame
@@ -507,21 +616,13 @@ async def process_video(job: Job, update_progress: ProgressCallback) -> str:
                     )
 
             # Flush remaining frames
-            if frame_buffer:
-                processed = flush_batch(frame_buffer)
-                for out_frame in processed:
-                    if prev_output_frame is not None:
-                        out_frame = cv2.addWeighted(
-                            out_frame, 0.85,
-                            prev_output_frame, 0.15,
-                            0,
-                        )
-                    prev_output_frame = out_frame
-                    writer.write(out_frame)
+            write_batch(frame_buffer)
 
         finally:
             cap.release()
-            writer.release()
+            if writer is not None:
+                writer.release()
+            pool.shutdown(wait=True, cancel_futures=True)
 
         logger.info(
             "swap_complete",
@@ -531,26 +632,8 @@ async def process_video(job: Job, update_progress: ProgressCallback) -> str:
             workers=num_workers,
         )
 
-        # ── Step 5: Encode final output ───────────────────────────────────────
-        update_progress(JobStatus.ENCODING, 90, "Encoding final video...")
-        from datetime import datetime
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_path = settings.output_dir / f"faceswap_{timestamp}_{job.quality}_{job_id[:8]}.mp4"
-
-        mux_audio_video(
-            frames_video=raw_output,
-            audio_path=audio_path if has_audio else None,
-            output_path=output_path,
-            fps=fps,
-            crf=q["crf"],
-            preset=q["preset"],
-            codec=settings.output_codec,
-            vt_quality=q.get("vt_quality", "60"),      # VideoToolbox quality (macOS only)
-            vt_bitrate=q.get("vt_bitrate", "8M"),       # VideoToolbox bitrate cap (macOS only)
-            quality=job.quality,                         # TNR strength: fast=off, balanced=light, high=strong
-        )
-
-        logger.info("encoding_complete", job_id=job_id, output=str(output_path))
+        update_progress(JobStatus.ENCODING, 90, "Finalizing video...")
+        logger.info("encoding_complete", job_id=job_id, output=str(output_path), streamed=True)
         return str(output_path)
 
     loop = asyncio.get_running_loop()

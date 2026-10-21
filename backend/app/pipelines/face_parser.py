@@ -116,6 +116,9 @@ class FaceParserONNX:
                 provider_options = [
                     {
                         "ModelCacheDirectory": cache_dir,
+                        "ModelFormat": "MLProgram",
+                        "MLComputeUnits": "ALL",
+                        "SpecializationStrategy": "FastPrediction",
                         # MLComputeUnits NOT set → CoreML default = ALL
                         # (ANE + GPU + CPU). Apple enum: 0=cpuOnly, 1=cpuAndGPU,
                         # 2=all, 3=cpuAndNeuralEngine — omitting = safest "all".

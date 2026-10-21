@@ -194,6 +194,72 @@ def _build_temporal_nr_args(quality: str) -> list[str]:
     return result
 
 
+class RawVideoEncoder:
+    """Stream processed BGR frames directly into the final video encoder.
+
+    This avoids a large intermediate file, which is important for 5–10 minute
+    720p jobs on a 512GB SSD. On Apple Silicon the final encode uses
+    VideoToolbox; other platforms fall back to the configured software codec.
+    """
+
+    def __init__(
+        self,
+        output_path: Path,
+        width: int,
+        height: int,
+        fps: float,
+        audio_path: Optional[Path] = None,
+        crf: int = 18,
+        preset: str = "medium",
+        codec: str = "libx264",
+        vt_quality: str = "60",
+        vt_bitrate: Optional[str] = None,
+        quality: str = "balanced",
+    ):
+        video_args = _build_video_encode_args(
+            codec, crf, preset, vt_quality, vt_bitrate
+        )
+        tnr_args = _build_temporal_nr_args(quality)
+        cmd = [
+            "ffmpeg", "-y", "-loglevel", "error",
+            "-f", "rawvideo", "-pix_fmt", "bgr24",
+            "-s", f"{width}x{height}", "-r", str(fps), "-i", "-",
+        ]
+        has_audio = audio_path and audio_path.exists() and audio_path.stat().st_size > 0
+        if has_audio:
+            cmd += ["-i", str(audio_path)]
+        cmd += [
+            *tnr_args,
+            *video_args,
+        ]
+        if has_audio:
+            cmd += ["-c:a", "aac", "-b:a", "192k", "-shortest"]
+        cmd += ["-movflags", "+faststart", str(output_path)]
+
+        self.proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+    def write(self, frame) -> None:
+        if self.proc.stdin is None:
+            raise RuntimeError("FFmpeg video encoder is not available")
+        try:
+            self.proc.stdin.write(frame.tobytes())
+        except BrokenPipeError as exc:
+            details = self.proc.stderr.read().decode(errors="replace") if self.proc.stderr else ""
+            raise RuntimeError(f"FFmpeg video encoder stopped: {details[-500:]}") from exc
+
+    def release(self) -> None:
+        if self.proc.stdin is not None:
+            self.proc.stdin.close()
+        rc = self.proc.wait(timeout=600)
+        details = self.proc.stderr.read().decode(errors="replace") if self.proc.stderr else ""
+        if rc != 0:
+            raise RuntimeError(f"FFmpeg streaming encode failed: {details[-500:]}")
+
+
 
 def mux_audio_video(
     frames_video: Path,

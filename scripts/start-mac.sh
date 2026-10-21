@@ -36,10 +36,8 @@ echo "  🔍 Checking dependencies..."
 PYTHON=""
 if command -v python3.11 >/dev/null 2>&1; then
     PYTHON="python3.11"
-elif command -v python3 >/dev/null 2>&1; then
-    PYTHON="python3"
 else
-    echo "  ❌ Python not found."
+    echo "  ❌ Python 3.11 is required for InsightFace on Apple Silicon."
     echo "     Fix: brew install python@3.11"
     exit 1
 fi
@@ -94,34 +92,44 @@ if [ ! -f "$VENV/bin/activate" ]; then
         exit 1
     fi
 
-    # ── CRITICAL: swap onnxruntime → onnxruntime-silicon ─────────────────────
-    # Standard onnxruntime has NO CoreML support and NO arm64 native wheel.
-    # onnxruntime-silicon = Apple's official ONNX Runtime fork with:
-    #   - CoreMLExecutionProvider (Neural Engine + GPU)
-    #   - arm64 native wheel (no Rosetta overhead)
-    echo "  🔄 Switching to onnxruntime-silicon (CoreML + Metal support)..."
-    pip uninstall onnxruntime onnxruntime-gpu -y -q 2>/dev/null || true
-    pip install onnxruntime-silicon -q
-    if [ $? -ne 0 ]; then
-        echo "  ⚠️  onnxruntime-silicon install failed — falling back to standard onnxruntime"
-        echo "     CoreML acceleration will not be available. App will still work via CPU."
-        pip install onnxruntime -q
+    # Official macOS ONNX Runtime wheels may already include CoreML. Keep that
+    # working installation when possible; use the silicon wheel only as fallback.
+    if "$VENV/bin/python" -c "import onnxruntime as ort; raise SystemExit(0 if 'CoreMLExecutionProvider' in ort.get_available_providers() else 1)" 2>/dev/null; then
+        echo "  ✅ Official ONNX Runtime CoreML provider available"
     else
-        echo "  ✅ onnxruntime-silicon installed (CoreML + Neural Engine enabled)"
+        echo "  🔄 CoreML provider not found — trying onnxruntime-silicon fallback..."
+        pip uninstall onnxruntime onnxruntime-gpu -y -q 2>/dev/null || true
+        pip install onnxruntime-silicon -q
+        if [ $? -ne 0 ]; then
+            echo "  ⚠️  CoreML package install failed — app will use CPU fallback"
+            pip install onnxruntime -q
+        else
+            echo "  ✅ onnxruntime-silicon fallback installed"
+        fi
     fi
 
     echo "  ✅ All dependencies installed"
 else
     source "$VENV/bin/activate"
 
+    if ! "$VENV/bin/python" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 11) else 1)' 2>/dev/null; then
+        echo "  ❌ Existing backend/.venv is not Python 3.11."
+        echo "     Remove backend/.venv on the new Mac and rerun this script."
+        exit 1
+    fi
+
     # Check if onnxruntime-silicon is already installed (might have been skipped)
-    if ! "$PYTHON" -c "import onnxruntime; p = onnxruntime.get_available_providers(); exit(0 if 'CoreMLExecutionProvider' in p else 1)" 2>/dev/null; then
+    if ! "$VENV/bin/python" -c "import onnxruntime; p = onnxruntime.get_available_providers(); exit(0 if 'CoreMLExecutionProvider' in p else 1)" 2>/dev/null; then
         echo ""
-        echo "  🔄 CoreML not available in onnxruntime — upgrading to onnxruntime-silicon..."
+        echo "  🔄 CoreML not available — trying onnxruntime-silicon fallback..."
         pip uninstall onnxruntime onnxruntime-gpu -y -q 2>/dev/null || true
         pip install onnxruntime-silicon -q && echo "  ✅ onnxruntime-silicon installed" || \
             echo "  ⚠️  onnxruntime-silicon install failed — running on CPU only"
     fi
+fi
+
+if ! "$VENV/bin/python" -c "import onnxruntime as ort; p=ort.get_available_providers(); print('  ONNX providers:', ', '.join(p)); raise SystemExit(0 if 'CoreMLExecutionProvider' in p else 1)"; then
+    echo "  ⚠️  CoreMLExecutionProvider unavailable — FaceFlux will run on CPU fallback."
 fi
 
 # ── Create CoreML cache dirs early (avoids permission errors on first run) ────
